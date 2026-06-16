@@ -2,6 +2,3 @@ node_modules/
 data/
 .env
 *.log
-
-# 个人背景图(部署时手动同步)
-public/bg.jpg
