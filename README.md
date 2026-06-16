@@ -1,5 +1,9 @@
 # 签到清单 Checkin Tracker
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
+[![GitHub Stars](https://img.shields.io/github/stars/SDA2333/checkin-tracker?style=social)](https://github.com/SDA2333/checkin-tracker/stargazers)
+
 一个轻量的个人「签到清单 + 续期提醒」网站,解放你的记忆负担。
 
 ## ✨ 功能

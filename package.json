@@ -1,15 +1,35 @@
 {
   "name": "checkin-tracker",
   "version": "1.0.0",
-  "description": "每日签到清单 + 续期提醒",
+  "description": "个人签到清单 + 续期提醒 | Daily check-in tracker with renewal reminders",
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=18"
   },
+  "keywords": [
+    "checkin",
+    "tracker",
+    "reminder",
+    "renewal",
+    "daily",
+    "sqlite",
+    "express"
+  ],
+  "author": "SDA2333",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SDA2333/checkin-tracker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SDA2333/checkin-tracker/issues"
+  },
+  "homepage": "https://github.com/SDA2333/checkin-tracker#readme",
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "cookie-parser": "^1.4.7",
