@@ -51,19 +51,39 @@ async function loadToday() {
   if (!data.sites.length) {
     items = `<div class="empty">还没有签到网站。<br>去「管理」里添加你每天要签到的网站吧。</div>`;
   } else {
-    items = data.sites.map((s) => {
-      const href = hrefOf(s.url);
-      return `<div class="checkitem ${s.done ? 'done' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}">
-        <div class="checkbox" aria-label="完成标记">${s.done ? '✓' : ''}</div>
-        <div class="info">
-          <div class="name">${esc(s.name)}</div>
-          <div class="sub">
-            ${s.category ? `<span class="tag">${esc(s.category)}</span>` : ''}
-            ${s.frequency === 'weekly' ? '<span>每周</span>' : ''}
-            ${s.streak ? `<span class="streak">🔥 连续 ${s.streak} 天</span>` : ''}
+    // 按 category 分组
+    const groups = {};
+    data.sites.forEach((s) => {
+      const cat = s.category || '其他';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(s);
+    });
+
+    items = Object.keys(groups).map((cat) => {
+      const sites = groups[cat];
+      const groupItems = sites.map((s) => {
+        const href = hrefOf(s.url);
+        return `<div class="checkitem ${s.done ? 'done' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}">
+          <div class="checkbox" aria-label="完成标记">${s.done ? '✓' : ''}</div>
+          <div class="info">
+            <div class="name">${esc(s.name)}</div>
+            <div class="sub">
+              ${s.category ? `<span class="tag">${esc(s.category)}</span>` : ''}
+              ${s.frequency === 'weekly' ? '<span>每周</span>' : ''}
+              ${s.streak ? `<span class="streak">🔥 连续 ${s.streak} 天</span>` : ''}
+            </div>
           </div>
+          ${href ? `<a class="go" href="${esc(href)}" target="_blank" rel="noopener" data-action="go" data-id="${s.id}">去签到 ↗</a>` : ''}
+        </div>`;
+      }).join('');
+
+      return `<div class="group" data-category="${esc(cat)}">
+        <div class="group-header">
+          <span class="group-arrow">▼</span>
+          <span class="group-title">${esc(cat)}</span>
+          <span class="group-count">(${sites.length})</span>
         </div>
-        ${href ? `<a class="go" href="${esc(href)}" target="_blank" rel="noopener" data-action="go" data-id="${s.id}">去签到 ↗</a>` : ''}
+        <div class="group-items">${groupItems}</div>
       </div>`;
     }).join('');
   }
@@ -77,7 +97,7 @@ async function loadToday() {
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
     </div>
-    <div class="card" style="padding:0">${items}</div>`;
+    <div>${items}</div>`;
 }
 
 /* ---------- 日历 ---------- */
@@ -313,6 +333,14 @@ bgToggle.addEventListener('click', () => {
 // 今日
 const todayView = document.getElementById('view-today');
 todayView.addEventListener('click', async (e) => {
+  // 分组折叠/展开
+  const header = e.target.closest('.group-header');
+  if (header) {
+    const group = header.closest('.group');
+    group.classList.toggle('collapsed');
+    return;
+  }
+
   const t = e.target.closest('[data-action]');
   if (t && t.dataset.action === 'go') {
     // 点「去签到」时立刻打勾，静默提交打卡 API（不阻塞链接跳转）

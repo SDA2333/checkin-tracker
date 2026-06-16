@@ -114,6 +114,49 @@ input:focus, select:focus { border-color: var(--brand); }
 .streak { color: var(--amber); font-weight: 600; }
 .go { color: var(--brand); font-size: 13px; font-weight: 600; white-space: nowrap; pointer-events: auto; }
 
+/* 分组 */
+.group { margin-bottom: 16px; }
+.group-header {
+  background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+  border-radius: 10px 10px 0 0;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e40af;
+  border: 1px solid #dbeafe;
+  border-bottom: none;
+}
+.group-header:hover { background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%); }
+.group-arrow {
+  font-size: 12px;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+.group.collapsed .group-arrow { transform: rotate(-90deg); }
+.group-title { flex: 1; }
+.group-count { font-size: 13px; color: #60a5fa; font-weight: 500; }
+.group-items {
+  border: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.group.collapsed .group-items { display: none; }
+
+/* 已完成灰化 */
+.checkitem.done {
+  opacity: 0.5;
+  background: #f9fafb;
+}
+.checkitem.done:hover {
+  opacity: 0.7;
+  background: #f3f4f6;
+}
+
 /* ---- 日历 ---- */
 .cal-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 12px; }
 .cal-head .title { font-size: 18px; font-weight: 700; min-width: 130px; text-align: center; }
