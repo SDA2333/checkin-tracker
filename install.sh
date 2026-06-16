@@ -22,6 +22,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# 创建专用用户(如果不存在)
+if ! id -u checkin &>/dev/null; then
+  echo -e "${YELLOW}创建专用用户 checkin...${NC}"
+  useradd -r -s /bin/false -d /opt/checkin -M checkin
+  echo -e "${GREEN}✓${NC} 用户 checkin 已创建"
+else
+  echo -e "${GREEN}✓${NC} 用户 checkin 已存在"
+fi
+
 # 检查 Node.js
 echo -e "${YELLOW}[1/7]${NC} 检查 Node.js..."
 if ! command -v node &> /dev/null; then
@@ -64,6 +73,10 @@ else
   git clone https://github.com/SDA2333/checkin-tracker.git "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
+
+# 设置目录权限
+chown -R checkin:checkin "$INSTALL_DIR"
+chmod 750 "$INSTALL_DIR"
 
 # 安装依赖
 echo -e "${YELLOW}[4/7]${NC} 安装 Node.js 依赖..."

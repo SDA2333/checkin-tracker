@@ -34,11 +34,12 @@ wget -qO- https://raw.githubusercontent.com/SDA2333/checkin-tracker/master/insta
 **安装脚本会自动**:
 1. ✅ 检查 Node.js 环境(需要 18+,不满足会提示)
 2. ✅ 安装编译工具(gcc/make,用于编译 SQLite 原生模块)
-3. ✅ 克隆代码到 `/opt/checkin`
-4. ✅ 安装 npm 依赖
-5. ✅ 生成随机强密码并配置 `.env`
-6. ✅ 配置 systemd 服务(开机自启、崩溃自重启)
-7. ✅ 启动服务并检查状态
+3. ✅ 创建专用用户 `checkin`(非 root,更安全)
+4. ✅ 克隆代码到 `/opt/checkin`
+5. ✅ 安装 npm 依赖
+6. ✅ 生成随机强密码并配置 `.env`
+7. ✅ 配置 systemd 服务(开机自启、崩溃自重启、systemd 安全沙箱)
+8. ✅ 启动服务并检查状态
 
 安装完成后会显示:
 - 🔐 **登录密码**(保存好,可稍后在 `/opt/checkin/.env` 中修改)
@@ -51,24 +52,31 @@ wget -qO- https://raw.githubusercontent.com/SDA2333/checkin-tracker/master/insta
 如果不想用一键脚本,也可以手动操作:
 
 ```bash
-# 1. 克隆仓库
+# 1. 创建专用用户(更安全)
+useradd -r -s /bin/false -d /opt/checkin -M checkin
+
+# 2. 克隆仓库
 git clone https://github.com/SDA2333/checkin-tracker.git /opt/checkin
 cd /opt/checkin
 
-# 2. 安装依赖
+# 3. 安装依赖
 npm install --omit=dev
 
-# 3. 配置环境变量
+# 4. 配置环境变量
 cp .env.example .env
 nano .env  # 修改 APP_PASSWORD 为你的密码
 
-# 4. 配置 systemd 服务
+# 5. 设置目录权限
+chown -R checkin:checkin /opt/checkin
+chmod 750 /opt/checkin
+
+# 6. 配置 systemd 服务
 NODE_PATH=$(command -v node)
 sed "s|__NODE__|$NODE_PATH|" deploy/checkin.service > /etc/systemd/system/checkin.service
 systemctl daemon-reload
 systemctl enable --now checkin
 
-# 5. 检查状态
+# 7. 检查状态
 systemctl status checkin
 ```
 
