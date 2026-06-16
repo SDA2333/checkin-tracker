@@ -1,0 +1,18 @@
+# systemd 服务模板。部署脚本会把 __NODE__ 替换为服务器上 `which node` 的实际路径，
+# 并安装到 /etc/systemd/system/checkin.service
+[Unit]
+Description=签到清单 Checkin Tracker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/checkin
+EnvironmentFile=/opt/checkin/.env
+Environment=NODE_ENV=production
+ExecStart=__NODE__ /opt/checkin/server.js
+Restart=on-failure
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

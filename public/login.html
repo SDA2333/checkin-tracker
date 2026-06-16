@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>登录 · 签到清单</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: #1e293b; padding: 20px;
+    }
+    .card {
+      background: #fff; border-radius: 18px; padding: 36px 30px; width: 100%; max-width: 360px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.25);
+    }
+    h1 { margin: 0 0 4px; font-size: 26px; text-align: center; }
+    p.sub { margin: 0 0 24px; text-align: center; color: #64748b; font-size: 14px; }
+    label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; }
+    input {
+      width: 100%; padding: 12px 14px; font-size: 16px; border: 1.5px solid #e2e8f0;
+      border-radius: 10px; outline: none; transition: border-color .15s;
+    }
+    input:focus { border-color: #6366f1; }
+    button {
+      width: 100%; margin-top: 18px; padding: 12px; font-size: 16px; font-weight: 600;
+      color: #fff; background: #6366f1; border: none; border-radius: 10px; cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover { background: #4f46e5; }
+    .err { margin-top: 14px; color: #dc2626; font-size: 14px; text-align: center; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <form class="card" id="form">
+    <h1>✓ 签到清单</h1>
+    <p class="sub">请输入访问密码</p>
+    <label for="pw">密码</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus />
+    <button type="submit">登录</button>
+    <div class="err" id="err"></div>
+  </form>
+  <script>
+    const form = document.getElementById('form');
+    const err = document.getElementById('err');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const password = document.getElementById('pw').value;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (res.ok) { location.href = '/'; return; }
+        const data = await res.json().catch(() => ({}));
+        err.textContent = data.error || '登录失败';
+      } catch {
+        err.textContent = '网络错误，请重试';
+      }
+    });
+  </script>
+</body>
+</html>

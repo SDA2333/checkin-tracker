@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>签到清单</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">✓ 签到清单</div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="today" class="active">今日</button>
+      <button data-tab="calendar">日历</button>
+      <button data-tab="renew">续期</button>
+      <button data-tab="manage">管理</button>
+    </nav>
+    <button class="bg-toggle" id="bgToggle" title="切换背景">🖼️</button>
+    <button class="logout" id="logout" title="退出登录">退出</button>
+  </header>
+
+  <main>
+    <section id="view-today" class="view"></section>
+    <section id="view-calendar" class="view hidden"></section>
+    <section id="view-renew" class="view hidden"></section>
+    <section id="view-manage" class="view hidden"></section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
