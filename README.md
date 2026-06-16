@@ -17,6 +17,12 @@
 
 **技术栈**: Node.js + Express + SQLite (零依赖,一个文件搞定数据)
 
+## 📸 截图
+
+![今日签到页面](screenshots/screenshot-today.jpg)
+
+*今日签到页面 - 显示进度、连续天数、可选背景图*
+
 ## 🚀 一键安装
 
 在你的 **Linux 服务器**(需要 root 权限)上运行:
