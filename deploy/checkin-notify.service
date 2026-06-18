@@ -1,0 +1,11 @@
+[Unit]
+Description=签到清单 续期到期提醒（QQ 推送）
+Wants=network-online.target
+After=network-online.target openclaw-gateway.service
+
+[Service]
+Type=oneshot
+# 把 QQ 推送目标填到这里（user:<openid> 或 group:<group_openid>），由 openclaw directory/会话记录获取
+Environment=CHECKIN_QQ_TARGET=
+ExecStart=/usr/bin/python3 /opt/checkin/notify.py
+User=root

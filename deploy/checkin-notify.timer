@@ -1,0 +1,13 @@
+[Unit]
+Description=每天定时检查续期到期并推送 QQ 提醒
+
+[Timer]
+# 每天 09:00 触发（服务器本地时区）
+OnCalendar=*-*-* 09:00:00
+# 错过了（如关机）开机后补跑
+Persistent=true
+AccuracySec=1min
+Unit=checkin-notify.service
+
+[Install]
+WantedBy=timers.target
