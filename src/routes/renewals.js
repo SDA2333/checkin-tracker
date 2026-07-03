@@ -56,6 +56,7 @@ r.post('/', (req, res) => {
     renewal_policy = 'extend_from_due',
     remind_before_days = 3,
     note = '',
+    category = '',
   } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: '名称不能为空' });
   const cycle = Number(cycle_days);
@@ -69,8 +70,8 @@ r.post('/', (req, res) => {
   const info = db
     .prepare(
       `INSERT INTO renewals
-       (name, url, cycle_days, last_renewed, current_period_start, current_period_end, renewal_policy, remind_before_days, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (name, url, cycle_days, last_renewed, current_period_start, current_period_end, renewal_policy, remind_before_days, note, category)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       String(name).trim(),
@@ -81,7 +82,8 @@ r.post('/', (req, res) => {
       end,
       policy,
       Number(remind_before_days) || 0,
-      String(note)
+      String(note),
+      String(category).trim()
     );
   db.prepare(
     `INSERT INTO renewal_history
@@ -106,6 +108,7 @@ r.put('/:id', (req, res) => {
     renewal_policy,
     remind_before_days,
     note,
+    category,
     archived,
   } = req.body || {};
   if (cycle_days !== undefined) {
@@ -136,7 +139,7 @@ r.put('/:id', (req, res) => {
   db.prepare(
     `UPDATE renewals
      SET name=?, url=?, cycle_days=?, last_renewed=?, current_period_start=?, current_period_end=?, renewal_policy=?,
-         remind_before_days=?, note=?, archived=?
+         remind_before_days=?, note=?, category=?, archived=?
      WHERE id=?`
   ).run(
     name !== undefined ? String(name).trim() : cur.name,
@@ -148,6 +151,7 @@ r.put('/:id', (req, res) => {
     renewal_policy !== undefined ? String(renewal_policy) : normalizePolicy(cur.renewal_policy),
     remind_before_days !== undefined ? Number(remind_before_days) || 0 : cur.remind_before_days,
     note !== undefined ? String(note) : cur.note,
+    category !== undefined ? String(category).trim() : (cur.category || ''),
     archived !== undefined ? (archived ? 1 : 0) : cur.archived,
     id
   );

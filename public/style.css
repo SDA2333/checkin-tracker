@@ -114,7 +114,7 @@ input:focus, select:focus { border-color: var(--brand); }
 .streak { color: var(--amber); font-weight: 600; }
 .go { color: var(--brand); font-size: 13px; font-weight: 600; white-space: nowrap; pointer-events: auto; }
 
-/* 分组 */
+/* 分组（今日签到 + 续期通用） */
 .group { margin-bottom: 16px; }
 .group-header {
   background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
@@ -124,6 +124,7 @@ input:focus, select:focus { border-color: var(--brand); }
   user-select: none;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   font-weight: 600;
   color: #1e40af;
@@ -131,11 +132,17 @@ input:focus, select:focus { border-color: var(--brand); }
   border-bottom: none;
 }
 .group-header:hover { background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%); }
-.group-arrow {
+.group-name {
+  font-weight: 600;
+  color: #1e40af;
+}
+.group-toggle, .group-arrow {
   font-size: 12px;
   transition: transform 0.2s;
   display: inline-block;
+  color: #1e40af;
 }
+.group.collapsed .group-toggle,
 .group.collapsed .group-arrow { transform: rotate(-90deg); }
 .group-title { flex: 1; }
 .group-count { font-size: 13px; color: #60a5fa; font-weight: 500; }
@@ -146,6 +153,23 @@ input:focus, select:focus { border-color: var(--brand); }
   background: #fff;
 }
 .group.collapsed .group-items { display: none; }
+
+/* ---- 分类推荐提示 ---- */
+.category-suggest {
+  background: #fffbf0;
+  border: 1px solid #ffe4a3;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #8b6914;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.category-suggest strong {
+  color: #4a3600;
+}
 
 /* 已完成灰化 */
 .checkitem.done {
@@ -190,6 +214,22 @@ input:focus, select:focus { border-color: var(--brand); }
 .badge.soon { background: var(--amber-bg); color: var(--amber); }
 .badge.overdue { background: var(--red-bg); color: var(--red); }
 .renew-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.group-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.group-content .card {
+  border-radius: 0;
+  border-top: none;
+}
+.group-content .card:first-child {
+  border-top: 1px solid var(--line);
+}
+.group-content .card:last-child {
+  border-radius: 0 0 10px 10px;
+}
+.group.collapsed .group-content { display: none; }
 
 /* ---- 管理 ---- */
 .manage-item { display: flex; align-items: center; gap: 10px; }
@@ -260,4 +300,75 @@ input:focus, select:focus { border-color: var(--brand); }
   /* 日期选择器和进度条:小屏堆叠 */
   .today-head { gap: 8px; }
   .progress { min-width: 100%; }
+
+  /* 设置页:URL 行竖排 */
+  .url-row { flex-direction: column; gap: 8px; }
+  .url-row .bark-url { width: 100%; }
+}
+
+/* ---- 设置页 ---- */
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.url-row .bark-url {
+  flex: 1;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.history-item.success {
+  border-left: 3px solid var(--green);
+}
+
+.history-item.failed {
+  border-left: 3px solid var(--red);
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.history-status {
+  font-size: 18px;
+}
+
+.history-date {
+  color: var(--ink);
+}
+
+.history-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-error {
+  color: var(--red);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.history-detail {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 4px 0;
+  padding-left: 20px;
 }

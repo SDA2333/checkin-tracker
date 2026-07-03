@@ -205,7 +205,22 @@ function renderRenewForm() {
   const end = e.current_period_end || e.next_due || addDaysLocal(start, cycle);
   const policy = e.renewal_policy || 'extend_from_due';
   box.innerHTML = `<div class="card"><div class="form-grid">
-    <div class="field full"><label>名称 *</label><input id="rn-name" value="${esc(e.name || '')}" placeholder="如 XX 会员 / XX 服务器"></div>
+    <div class="field full"><label>名称 *</label><input id="rn-name" value="${esc(e.name || '')}" placeholder="如 GPT Plus 会员"></div>
+    <div class="field full">
+      <label>分类（可选）</label>
+      <div class="category-suggest" id="category-suggest" style="display:none">
+        💡 建议分类：<strong id="suggest-text"></strong>
+        <button class="btn ghost sm" data-action="accept-suggest" type="button">采纳</button>
+      </div>
+      <input id="rn-category" list="category-list" value="${esc(e.category || '')}" placeholder="如 会员服务">
+      <datalist id="category-list">
+        <option value="会员服务">
+        <option value="服务器">
+        <option value="域名">
+        <option value="软件订阅">
+        <option value="存储服务">
+      </datalist>
+    </div>
     <div class="field full"><label>链接（可选）</label><input id="rn-url" value="${esc(e.url || '')}" placeholder="https://..."></div>
     <div class="field"><label>周期天数 *</label><input id="rn-cycle" type="number" min="1" value="${cycle}"></div>
     <div class="field"><label>续期策略</label><select id="rn-policy">
@@ -222,6 +237,58 @@ function renderRenewForm() {
     <button class="btn" data-action="save">${state.editRenew ? '保存修改' : '添加'}</button>
     <button class="btn ghost" data-action="cancel">取消</button>
   </div></div>`;
+
+  // 绑定名称输入监听，实时推荐分类
+  setTimeout(() => {
+    const nameInput = document.getElementById('rn-name');
+    const categoryInput = document.getElementById('rn-category');
+    const suggestBox = document.getElementById('category-suggest');
+    const suggestText = document.getElementById('suggest-text');
+
+    if (nameInput && categoryInput && suggestBox && suggestText) {
+      // 使用命名函数，避免重复绑定
+      const handleCategoryInput = () => {
+        const suggested = suggestCategory(nameInput.value);
+        if (suggested && !categoryInput.value) {
+          suggestText.textContent = suggested;
+          suggestBox.style.display = 'block';
+        } else {
+          suggestBox.style.display = 'none';
+        }
+      };
+
+      // 每次渲染表单时会创建新的 input 元素（innerHTML），所以不需要 removeEventListener
+      nameInput.addEventListener('input', handleCategoryInput);
+
+      // 初始触发一次（编辑时如果名称已填充）
+      if (nameInput.value) {
+        handleCategoryInput();
+      }
+    }
+  }, 0);
+}
+
+// 分类推荐规则
+function suggestCategory(name) {
+  const nameLC = name.toLowerCase();
+
+  if (/plus|premium|pro|会员|vip|订阅|subscription/.test(nameLC)) {
+    return '会员服务';
+  }
+  if (/云|server|服务器|vps|ecs|轻量|阿里|腾讯|aws|azure/.test(nameLC)) {
+    return '服务器';
+  }
+  if (/域名|domain|\.com|\.cn|\.net|dns/.test(nameLC)) {
+    return '域名';
+  }
+  if (/office|adobe|jetbrains|github|notion|chatgpt|gpt/.test(nameLC)) {
+    return '软件订阅';
+  }
+  if (/oss|cos|s3|存储|storage|backup|网盘/.test(nameLC)) {
+    return '存储服务';
+  }
+
+  return '';
 }
 
 function syncRenewEndFromStart() {
@@ -238,35 +305,94 @@ async function loadRenewals() {
   const view = document.getElementById('view-renew');
   const list = await api(`/api/renewals?today=${localToday()}`);
   state.renewals = list;
+
+  // 按分类分组
+  const groups = {};
+  list.forEach(r => {
+    const cat = r.category || '未分类';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(r);
+  });
+
+  // 按紧迫度排序各分组
+  Object.keys(groups).forEach(cat => {
+    groups[cat].sort((a, b) => a.days_left - b.days_left);
+  });
+
+  // 将"未分类"放到最后
+  const sortedCategories = Object.keys(groups).sort((a, b) => {
+    if (a === '未分类') return 1;
+    if (b === '未分类') return -1;
+    return a.localeCompare(b);
+  });
+
+  const groupsHtml = sortedCategories.map(cat => {
+    const items = groups[cat];
+    const hasUrgent = items.some(r => r.status === 'overdue' || r.status === 'soon');
+    return `
+      <div class="group ${hasUrgent ? '' : 'collapsed'}">
+        <div class="group-header">
+          <span class="group-name">${esc(cat)} (${items.length})</span>
+          <span class="group-toggle">▼</span>
+        </div>
+        <div class="group-content">
+          ${items.map(renewCard).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+
   view.innerHTML = `
     <div class="section-head"><h2>续期提醒</h2><button class="btn sm" data-action="add">+ 添加</button></div>
     <div id="renewForm"></div>
-    ${list.length ? list.map(renewCard).join('')
+    ${list.length ? groupsHtml
       : `<div class="empty">还没有续期项。<br>把需要定期续期的东西加进来（如 40 天续期），到期会自动提醒。</div>`}`;
-  if (state.showRenewForm || state.editRenew) renderRenewForm();
+
+  // 根据状态决定是否显示表单
+  if (state.showRenewForm || state.editRenew) {
+    renderRenewForm();
+  }
+
   updateRenewBadge(list);
 }
 
 async function saveRenew() {
-  const v = (id) => document.getElementById(id).value;
-  const body = {
-    name: v('rn-name').trim(), url: v('rn-url').trim(),
-    cycle_days: Number(v('rn-cycle')),
-    current_period_start: v('rn-start'),
-    current_period_end: v('rn-end'),
-    renewal_policy: v('rn-policy'),
-    remind_before_days: Number(v('rn-remind')), note: v('rn-note').trim(),
-  };
-  if (!body.name) return toast('请填写名称');
-  if (!(body.cycle_days > 0)) return toast('周期天数需为正整数');
-  if (!body.current_period_start) return toast('请选择当前周期开始日期');
-  if (!body.current_period_end) return toast('请选择当前到期日');
+  // 防止重复提交
+  const saveBtn = document.querySelector('[data-action="save"]');
+  if (saveBtn && saveBtn.disabled) return;
+  if (saveBtn) saveBtn.disabled = true;
+
   try {
-    if (state.editRenew) await api(`/api/renewals/${state.editRenew.id}`, { method: 'PUT', body: JSON.stringify(body) });
-    else await api('/api/renewals', { method: 'POST', body: JSON.stringify(body) });
-    state.showRenewForm = false; state.editRenew = null;
-    toast('已保存'); loadRenewals();
-  } catch (err) { toast(err.message); }
+    const v = (id) => document.getElementById(id).value;
+    const body = {
+      name: v('rn-name').trim(), url: v('rn-url').trim(),
+      cycle_days: Number(v('rn-cycle')),
+      current_period_start: v('rn-start'),
+      current_period_end: v('rn-end'),
+      renewal_policy: v('rn-policy'),
+      remind_before_days: Number(v('rn-remind')) || 0,
+      note: v('rn-note').trim(),
+      category: v('rn-category').trim(),
+    };
+    if (!body.name) return toast('请填写名称');
+    if (!(body.cycle_days > 0)) return toast('周期天数需为正整数');
+    if (!body.current_period_start) return toast('请选择当前周期开始日期');
+    if (!body.current_period_end) return toast('请选择当前到期日');
+
+    if (state.editRenew) {
+      await api(`/api/renewals/${state.editRenew.id}`, { method: 'PUT', body: JSON.stringify(body) });
+    } else {
+      await api('/api/renewals', { method: 'POST', body: JSON.stringify(body) });
+    }
+    state.showRenewForm = false;
+    state.editRenew = null;
+    toast('已保存');
+    await loadRenewals();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function promptEffectiveDateFor(id) {
@@ -369,8 +495,149 @@ async function refreshRenewBadge() {
   try { updateRenewBadge(await api(`/api/renewals?today=${localToday()}`)); } catch { /* ignore */ }
 }
 
+/* ---------- 设置页 ---------- */
+async function loadSettings() {
+  const view = document.getElementById('view-settings');
+
+  try {
+    const config = await api('/api/settings');
+    const history = await api('/api/settings/history?limit=10');
+
+    const urlInputs = (config.urls || ['']).map((url, i) =>
+      `<div class="url-row">
+        <input type="text" class="bark-url" data-index="${i}" value="${esc(url)}" placeholder="https://api.day.app/your-key">
+        ${config.urls.length > 1 ? `<button class="btn danger sm" data-action="remove-url" data-index="${i}">删除</button>` : ''}
+      </div>`
+    ).join('');
+
+    const historyHtml = history.length
+      ? history.map(h => {
+          const statusIcon = h.status === 'success' ? '✓' : '✗';
+          const statusClass = h.status === 'success' ? 'success' : 'failed';
+          const itemCount = h.items.length;
+          return `<div class="history-item ${statusClass}">
+            <div class="history-header">
+              <span class="history-status">${statusIcon}</span>
+              <span class="history-date">${h.date}</span>
+              <span class="history-count">${itemCount} 项</span>
+            </div>
+            ${h.error ? `<div class="history-error">${esc(h.error)}</div>` : ''}
+            ${h.items.map(item => `<div class="history-detail">${esc(item.name)} (${item.daysLeft >= 0 ? '剩' + item.daysLeft : '过期' + (-item.daysLeft)} 天)</div>`).join('')}
+          </div>`;
+        }).join('')
+      : '<div class="empty">暂无推送记录</div>';
+
+    view.innerHTML = `
+      <div class="section-head"><h2>⚙️ 推送设置</h2></div>
+
+      <div class="card">
+        <h3>Bark 推送配置</h3>
+        <div class="form-grid">
+          <div class="field full">
+            <label>Bark URL（支持多设备）</label>
+            <div id="url-container">${urlInputs}</div>
+            <button class="btn ghost sm" data-action="add-url" style="margin-top:8px">+ 添加设备</button>
+          </div>
+
+          <div class="field">
+            <label>推送标题</label>
+            <input id="cfg-title" value="${esc(config.title || '签到清单续期提醒')}">
+          </div>
+
+          <div class="field">
+            <label>通知分组</label>
+            <input id="cfg-group" value="${esc(config.group || '签到清单')}">
+          </div>
+
+          <div class="field">
+            <label>优先级</label>
+            <select id="cfg-level">
+              <option value="active" ${config.level === 'active' ? 'selected' : ''}>普通</option>
+              <option value="timeSensitive" ${config.level === 'timeSensitive' ? 'selected' : ''}>时效性（推荐）</option>
+              <option value="passive" ${config.level === 'passive' ? 'selected' : ''}>静默</option>
+            </select>
+          </div>
+
+          <div class="field full">
+            <label>图标 URL（可选）</label>
+            <input id="cfg-icon" value="${esc(config.icon || '')}" placeholder="https://...">
+          </div>
+
+          <div class="field full">
+            <label>点击跳转 URL（可选）</label>
+            <input id="cfg-jump" value="${esc(config.jumpUrl || '')}" placeholder="https://...">
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn" data-action="save-settings">保存配置</button>
+          <button class="btn ghost" data-action="test-push">发送测试消息</button>
+          <button class="btn ghost" data-action="check-now">立即检查并推送</button>
+        </div>
+      </div>
+
+      <div class="section-head" style="margin-top:24px"><h2>📊 推送历史</h2></div>
+      <div class="history-list">${historyHtml}</div>
+    `;
+  } catch (err) {
+    view.innerHTML = `<div class="empty">加载失败: ${esc(err.message)}</div>`;
+  }
+}
+
+async function saveSettings() {
+  const urls = Array.from(document.querySelectorAll('.bark-url'))
+    .map(input => input.value.trim())
+    .filter(Boolean);
+
+  if (urls.length === 0) {
+    return toast('请至少配置一个 Bark URL');
+  }
+
+  const config = {
+    urls,
+    title: document.getElementById('cfg-title').value.trim(),
+    group: document.getElementById('cfg-group').value.trim(),
+    level: document.getElementById('cfg-level').value,
+    icon: document.getElementById('cfg-icon').value.trim(),
+    jumpUrl: document.getElementById('cfg-jump').value.trim(),
+  };
+
+  try {
+    await api('/api/settings', { method: 'PUT', body: JSON.stringify(config) });
+    toast('配置已保存');
+  } catch (err) {
+    toast('保存失败: ' + err.message);
+  }
+}
+
+async function testPush() {
+  try {
+    toast('正在发送测试消息...');
+    const result = await api('/api/settings/test', { method: 'POST' });
+    toast(`测试消息已发送到 ${result.sent_to}/${result.total} 个设备`);
+  } catch (err) {
+    toast('发送失败: ' + err.message);
+  }
+}
+
+async function checkNow() {
+  try {
+    toast('正在检查续期项目...');
+    const result = await api('/api/settings/check-now', { method: 'POST' });
+
+    if (result.pending && result.pending.length > 0) {
+      toast(result.message);
+      loadSettings(); // 刷新历史记录
+    } else {
+      toast(result.message);
+    }
+  } catch (err) {
+    toast('检查失败: ' + err.message);
+  }
+}
+
 /* ---------- 导航 ---------- */
-const views = { today: loadToday, calendar: loadCalendar, renew: loadRenewals, manage: loadManage };
+const views = { today: loadToday, calendar: loadCalendar, renew: loadRenewals, manage: loadManage, settings: loadSettings };
 function switchTab(tab) {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
@@ -468,14 +735,44 @@ calView.addEventListener('click', (e) => {
 
 // 续期
 document.getElementById('view-renew').addEventListener('click', async (e) => {
+  // 分组折叠/展开
+  const header = e.target.closest('.group-header');
+  if (header) {
+    const group = header.closest('.group');
+    group.classList.toggle('collapsed');
+    return;
+  }
+
   const t = e.target.closest('[data-action]');
   if (!t) return;
   const id = t.dataset.id ? Number(t.dataset.id) : null;
   switch (t.dataset.action) {
-    case 'add': state.showRenewForm = true; state.editRenew = null; renderRenewForm(); break;
-    case 'cancel': state.showRenewForm = false; state.editRenew = null; { const b = document.getElementById('renewForm'); if (b) b.innerHTML = ''; } break;
-    case 'edit': state.editRenew = state.renewals.find((x) => x.id === id) || null; state.showRenewForm = true; renderRenewForm(); window.scrollTo({ top: 0, behavior: 'smooth' }); break;
-    case 'save': saveRenew(); break;
+    case 'add':
+      state.showRenewForm = true;
+      state.editRenew = null;
+      renderRenewForm();
+      break;
+    case 'cancel':
+      state.showRenewForm = false;
+      state.editRenew = null;
+      const box = document.getElementById('renewForm');
+      if (box) box.innerHTML = '';
+      break;
+    case 'accept-suggest': {
+      const suggested = document.getElementById('suggest-text').textContent;
+      document.getElementById('rn-category').value = suggested;
+      document.getElementById('category-suggest').style.display = 'none';
+      break;
+    }
+    case 'edit':
+      state.editRenew = state.renewals.find((x) => x.id === id) || null;
+      state.showRenewForm = false; // 编辑模式下不使用 showRenewForm
+      renderRenewForm();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      break;
+    case 'save':
+      saveRenew();
+      break;
     case 'renew': {
       const rn = state.renewals.find((x) => x.id === id);
       const policy = (rn && rn.renewal_policy) || 'extend_from_due';
@@ -539,6 +836,41 @@ document.getElementById('view-manage').addEventListener('click', async (e) => {
       try { await api(`/api/sites/${id}/move`, { method: 'POST', body: JSON.stringify({ dir: t.dataset.action }) }); loadManage(); }
       catch (err) { toast(err.message); }
       break;
+  }
+});
+
+// 设置
+document.getElementById('view-settings').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+
+  switch (t.dataset.action) {
+    case 'save-settings':
+      saveSettings();
+      break;
+    case 'test-push':
+      testPush();
+      break;
+    case 'check-now':
+      checkNow();
+      break;
+    case 'add-url': {
+      const container = document.getElementById('url-container');
+      const index = document.querySelectorAll('.bark-url').length;
+      const div = document.createElement('div');
+      div.className = 'url-row';
+      div.innerHTML = `
+        <input type="text" class="bark-url" data-index="${index}" placeholder="https://api.day.app/your-key">
+        <button class="btn danger sm" data-action="remove-url" data-index="${index}">删除</button>
+      `;
+      container.appendChild(div);
+      break;
+    }
+    case 'remove-url': {
+      const row = t.closest('.url-row');
+      if (row) row.remove();
+      break;
+    }
   }
 });
 

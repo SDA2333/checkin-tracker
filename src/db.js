@@ -50,6 +50,24 @@ CREATE TABLE IF NOT EXISTS renewals (
   created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 推送配置
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- 推送历史记录
+CREATE TABLE IF NOT EXISTS notification_logs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  sent_at    TEXT NOT NULL,
+  items      TEXT NOT NULL,  -- JSON 数组
+  status     TEXT NOT NULL,  -- success | failed
+  error_msg  TEXT,
+  results    TEXT,           -- JSON 数组
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_sent_at ON notification_logs(sent_at);
+
 -- 续期历史，便于回看
 CREATE TABLE IF NOT EXISTS renewal_history (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +110,8 @@ ensureColumn('renewal_history', 'new_period_end', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewal_history', 'policy_used', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewal_history', 'note', "TEXT NOT NULL DEFAULT ''");
 
+ensureColumn('renewals', 'category', "TEXT NOT NULL DEFAULT ''");
+
 db.prepare(
   `UPDATE renewals
    SET current_period_start = last_renewed
@@ -133,5 +153,29 @@ db.prepare(
    SET policy_used = 'legacy'
    WHERE policy_used = '' OR policy_used IS NULL`
 ).run();
+
+// 从环境变量迁移推送配置到数据库（仅首次运行）
+function migrateEnvToDb() {
+  const existing = db.prepare('SELECT COUNT(*) as count FROM settings').get();
+  if (existing.count > 0) return; // 已有配置，跳过迁移
+
+  const envMapping = {
+    bark_urls: process.env.CHECKIN_BARK_URLS?.split(',').map((u) => u.trim()).filter(Boolean) || [],
+    bark_title: process.env.CHECKIN_BARK_TITLE || '签到清单续期提醒',
+    bark_group: process.env.CHECKIN_BARK_GROUP || '签到清单',
+    bark_level: process.env.CHECKIN_BARK_LEVEL || 'timeSensitive',
+    bark_icon: process.env.CHECKIN_BARK_ICON || '',
+    bark_jump_url: process.env.CHECKIN_BARK_JUMP_URL || '',
+  };
+
+  const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
+  for (const [key, value] of Object.entries(envMapping)) {
+    stmt.run(key, JSON.stringify(value));
+  }
+
+  console.log('[db] 已从 .env 迁移推送配置到数据库');
+}
+
+migrateEnvToDb();
 
 export default db;

@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(ssh *)",
-      "Bash(tar czf *)"
+      "Bash(tar czf *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(cat)",
+      "Bash(scp -i \"C:/Users/m1380/.ssh/id_rsa\" -o BatchMode=yes /tmp/probe_db.py root@117.72.10.238:/tmp/probe_db.py)"
     ]
   }
 }

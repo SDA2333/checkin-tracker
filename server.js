@@ -17,6 +17,8 @@ import {
 import sitesRouter from './src/routes/sites.js';
 import checkinsRouter from './src/routes/checkins.js';
 import renewalsRouter from './src/routes/renewals.js';
+import settingsRouter from './src/routes/settings.js';
+import { startScheduler } from './src/notifications/scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dirname, 'public');
@@ -96,10 +98,12 @@ app.get(['/login.html', '/login'], (req, res) => res.sendFile(join(PUBLIC, 'logi
 app.use('/api/sites', requireAuth, sitesRouter);
 app.use('/api/checkins', requireAuth, checkinsRouter);
 app.use('/api/renewals', requireAuth, renewalsRouter);
+app.use('/api/settings', requireAuth, settingsRouter);
 
 // ---- 受保护的前端页面与静态资源 ----
 app.use(requireAuth, express.static(PUBLIC));
 
 app.listen(PORT, HOST, () => {
   console.log(`签到清单已启动: http://${HOST}:${PORT}  (鉴权: ${authDisabled ? '关闭' : '开启'})`);
+  startScheduler(); // 启动续期提醒定时任务
 });
