@@ -21,6 +21,8 @@ import renewalsRouter from './src/routes/renewals.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dirname, 'public');
 const PORT = process.env.PORT || 3000;
+// 监听地址。公网部署可设为 0.0.0.0；只给 Tailscale/内网访问时设为对应内网 IP。
+const HOST = process.env.HOST || '0.0.0.0';
 // 走 HTTPS（反向代理/Cloudflare）时设为 true：Cookie 仅在加密连接下发送
 const SECURE_COOKIE = String(process.env.SECURE_COOKIE || '').toLowerCase() === 'true';
 // 反向代理后面时设为代理层数（如 1），让限速能识别真实客户端 IP
@@ -32,13 +34,21 @@ if (TRUST_PROXY) app.set('trust proxy', Number(TRUST_PROXY) || 1);
 // 安全响应头（允许内联脚本/样式，因登录页用了内联脚本、卡片用了内联样式）
 app.use(
   helmet({
+    strictTransportSecurity: SECURE_COOKIE ? undefined : false,
     contentSecurityPolicy: {
+      useDefaults: false,
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'none'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'", 'https:', 'data:'],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+        objectSrc: ["'none'"],
       },
     },
   })
@@ -90,6 +100,6 @@ app.use('/api/renewals', requireAuth, renewalsRouter);
 // ---- 受保护的前端页面与静态资源 ----
 app.use(requireAuth, express.static(PUBLIC));
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`签到清单已启动: http://0.0.0.0:${PORT}  (鉴权: ${authDisabled ? '关闭' : '开启'})`);
+app.listen(PORT, HOST, () => {
+  console.log(`签到清单已启动: http://${HOST}:${PORT}  (鉴权: ${authDisabled ? '关闭' : '开启'})`);
 });

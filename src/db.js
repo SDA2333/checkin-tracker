@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS renewals (
   url                 TEXT    NOT NULL DEFAULT '',
   cycle_days          INTEGER NOT NULL,            -- 周期天数，如 40
   last_renewed        TEXT    NOT NULL,            -- 上次续期日期 YYYY-MM-DD
+  current_period_start TEXT   NOT NULL DEFAULT '',  -- 当前周期开始日期 YYYY-MM-DD
+  current_period_end   TEXT   NOT NULL DEFAULT '',  -- 当前周期到期日期 YYYY-MM-DD
+  renewal_policy       TEXT   NOT NULL DEFAULT 'extend_from_due', -- extend_from_due | reset_from_payment | manual_effective_date
   remind_before_days  INTEGER NOT NULL DEFAULT 3,  -- 到期前几天开始提醒
   note                TEXT    NOT NULL DEFAULT '',
   archived            INTEGER NOT NULL DEFAULT 0,
@@ -52,9 +55,83 @@ CREATE TABLE IF NOT EXISTS renewal_history (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   renewal_id  INTEGER NOT NULL,
   renewed_on  TEXT    NOT NULL,
+  paid_on     TEXT    NOT NULL DEFAULT '',
+  effective_on TEXT   NOT NULL DEFAULT '',
+  previous_period_start TEXT NOT NULL DEFAULT '',
+  previous_period_end   TEXT NOT NULL DEFAULT '',
+  new_period_start      TEXT NOT NULL DEFAULT '',
+  new_period_end        TEXT NOT NULL DEFAULT '',
+  policy_used           TEXT NOT NULL DEFAULT '',
+  note                  TEXT NOT NULL DEFAULT '',
   created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (renewal_id) REFERENCES renewals(id) ON DELETE CASCADE
 );
 `);
+
+function columnsOf(table) {
+  return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((x) => x.name));
+}
+
+function ensureColumn(table, column, definition) {
+  const columns = columnsOf(table);
+  if (!columns.has(column)) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  }
+}
+
+ensureColumn('renewals', 'current_period_start', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewals', 'current_period_end', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewals', 'renewal_policy', "TEXT NOT NULL DEFAULT 'extend_from_due'");
+
+ensureColumn('renewal_history', 'paid_on', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'effective_on', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'previous_period_start', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'previous_period_end', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'new_period_start', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'new_period_end', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'policy_used', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewal_history', 'note', "TEXT NOT NULL DEFAULT ''");
+
+db.prepare(
+  `UPDATE renewals
+   SET current_period_start = last_renewed
+   WHERE current_period_start = '' OR current_period_start IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewals
+   SET current_period_end = date(last_renewed, '+' || cycle_days || ' days')
+   WHERE current_period_end = '' OR current_period_end IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewal_history
+   SET paid_on = renewed_on
+   WHERE paid_on = '' OR paid_on IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewal_history
+   SET effective_on = renewed_on
+   WHERE effective_on = '' OR effective_on IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewal_history
+   SET new_period_start = renewed_on
+   WHERE new_period_start = '' OR new_period_start IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewal_history
+   SET new_period_end = date(renewed_on, '+' || COALESCE((SELECT cycle_days FROM renewals WHERE renewals.id = renewal_history.renewal_id), 0) || ' days')
+   WHERE new_period_end = '' OR new_period_end IS NULL`
+).run();
+
+db.prepare(
+  `UPDATE renewal_history
+   SET policy_used = 'legacy'
+   WHERE policy_used = '' OR policy_used IS NULL`
+).run();
 
 export default db;

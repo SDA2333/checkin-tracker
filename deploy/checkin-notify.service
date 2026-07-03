@@ -1,11 +1,12 @@
 [Unit]
-Description=签到清单 续期到期提醒（QQ 推送）
+Description=签到清单 续期到期提醒
 Wants=network-online.target
-After=network-online.target openclaw-gateway.service
+After=network-online.target
 
 [Service]
 Type=oneshot
-# 把 QQ 推送目标填到这里（user:<openid> 或 group:<group_openid>），由 openclaw directory/会话记录获取
-Environment=CHECKIN_QQ_TARGET=
+# 从 /opt/checkin/.env 读取 CHECKIN_BARK_URL / CHECKIN_BARK_JUMP_URL 等提醒配置。
+# 未配置 Bark 时，可用 CHECKIN_QQ_TARGET 走旧 OpenClaw QQ 通道。
+EnvironmentFile=-/opt/checkin/.env
 ExecStart=/usr/bin/python3 /opt/checkin/notify.py
 User=root

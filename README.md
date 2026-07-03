@@ -113,15 +113,60 @@ APP_PASSWORD=你的密码
 
 # 监听端口
 PORT=3000
+# 监听地址：公网直连用 0.0.0.0；Tailscale/内网访问可填 100.x.y.z 或 127.0.0.1
+# HOST=0.0.0.0
 
 # 数据库路径(默认 ./data/checkin.db)
 # DB_PATH=./data/checkin.db
 
 # 关闭登录验证(仅内网环境,公网勿用)
 # AUTH_DISABLED=false
+
+# Bark 续期提醒(推荐)
+# CHECKIN_TZ=Asia/Hong_Kong
+# CHECKIN_BARK_URL=https://api.day.app/你的BarkKey
+# 多设备推送可用逗号分隔
+# CHECKIN_BARK_URLS=https://api.day.app/你的iPhoneKey,https://api.day.app/你的iPadKey
+# CHECKIN_BARK_TITLE=签到清单续期提醒
+# CHECKIN_BARK_ICON=https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-calendar.png
+# CHECKIN_BARK_JUMP_URL=https://你的签到清单地址/
+
+# QQ/OpenClaw 旧通道，仅在未配置 Bark 时使用
+# CHECKIN_QQ_TARGET=user:<openid>
 ```
 
 修改后重启服务:`systemctl restart checkin`
+
+## 🔔 续期提醒
+
+推荐使用 Bark 推送。把 Bark App 里生成的推送地址写入 `/opt/checkin/.env`:
+
+```env
+CHECKIN_TZ=Asia/Hong_Kong
+CHECKIN_BARK_URL=https://api.day.app/你的BarkKey
+# 多台设备时改用:
+# CHECKIN_BARK_URLS=https://api.day.app/你的iPhoneKey,https://api.day.app/你的iPadKey
+CHECKIN_BARK_TITLE=签到清单续期提醒
+# 自定义图标需 iOS 15 或以上
+# CHECKIN_BARK_ICON=https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/google-calendar.png
+CHECKIN_BARK_JUMP_URL=https://你的签到清单地址/
+```
+
+安装提醒 timer:
+
+```bash
+cp /opt/checkin/deploy/checkin-notify.service /etc/systemd/system/checkin-notify.service
+cp /opt/checkin/deploy/checkin-notify.timer /etc/systemd/system/checkin-notify.timer
+systemctl daemon-reload
+systemctl enable --now checkin-notify.timer
+```
+
+手动测试:
+
+```bash
+systemctl start checkin-notify.service
+journalctl -u checkin-notify.service -n 50 --no-pager
+```
 
 ## 💾 备份
 
@@ -151,7 +196,7 @@ ss -tlnp | grep :3000
 
 **公网访问不了**:
 1. 检查服务是否在跑:`systemctl status checkin`
-2. 检查是否监听 `0.0.0.0:3000`:`ss -tlnp | grep 3000`
+2. 检查监听地址:`ss -tlnp | grep 3000`
 3. 检查云服务商安全组是否放行端口 3000
 
 ## 📸 截图

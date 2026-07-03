@@ -14,6 +14,20 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function hrefOf(u) { if (!u) return null; return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
+function policyLabel(policy) {
+  return ({
+    extend_from_due: '按原到期日顺延',
+    reset_from_payment: '按付款日重算',
+    manual_effective_date: '手动选择生效日',
+  })[policy] || '按原到期日顺延';
+}
+function renewButtonText(policy) {
+  return ({
+    extend_from_due: '✓ 已缴费，顺延',
+    reset_from_payment: '✓ 已缴费，重算',
+    manual_effective_date: '✓ 已缴费，选日期',
+  })[policy] || '✓ 已缴费，顺延';
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -161,14 +175,20 @@ function renewCard(rn) {
   else if (rn.days_left === 0) { big = '今天'; small = '到期'; }
   else { big = `${rn.days_left} 天`; small = '后到期'; }
   const href = hrefOf(rn.url);
+  const start = rn.current_period_start || rn.last_renewed;
+  const end = rn.current_period_end || rn.next_due;
+  const policy = rn.renewal_policy || 'extend_from_due';
   return `<div class="card renew-card" data-id="${rn.id}">
     <div class="badge ${rn.status}"><span>${big}</span><small>${small}</small></div>
     <div class="info">
       <div class="name">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(rn.name)} ↗</a>` : esc(rn.name)}</div>
-      <div class="muted">周期 ${rn.cycle_days} 天 · 上次 ${rn.last_renewed} · 下次 ${rn.next_due}</div>
+      <div class="muted">周期 ${rn.cycle_days} 天 · 当前到期 ${end} · ${policyLabel(policy)}</div>
+      <div class="muted">当前周期 ${start} → ${end}</div>
       ${rn.note ? `<div class="muted">${esc(rn.note)}</div>` : ''}
       <div class="renew-actions">
-        <button class="btn sm" data-action="renew" data-id="${rn.id}">✓ 今天已续期</button>
+        <button class="btn sm" data-action="renew" data-id="${rn.id}">${renewButtonText(policy)}</button>
+        <button class="btn ghost sm" data-action="renewToday" data-id="${rn.id}">按今天重算</button>
+        <button class="btn ghost sm" data-action="renewManual" data-id="${rn.id}">选择生效日</button>
         <button class="btn ghost sm" data-action="edit" data-id="${rn.id}">编辑</button>
         <button class="btn danger sm" data-action="del" data-id="${rn.id}">删除</button>
       </div>
@@ -180,11 +200,21 @@ function renderRenewForm() {
   const box = document.getElementById('renewForm');
   if (!box) return;
   const e = state.editRenew || {};
+  const cycle = e.cycle_days || 40;
+  const start = e.current_period_start || e.last_renewed || localToday();
+  const end = e.current_period_end || e.next_due || addDaysLocal(start, cycle);
+  const policy = e.renewal_policy || 'extend_from_due';
   box.innerHTML = `<div class="card"><div class="form-grid">
     <div class="field full"><label>名称 *</label><input id="rn-name" value="${esc(e.name || '')}" placeholder="如 XX 会员 / XX 服务器"></div>
     <div class="field full"><label>链接（可选）</label><input id="rn-url" value="${esc(e.url || '')}" placeholder="https://..."></div>
-    <div class="field"><label>周期天数 *</label><input id="rn-cycle" type="number" min="1" value="${e.cycle_days || 40}"></div>
-    <div class="field"><label>上次续期日期 *</label><input id="rn-last" type="date" value="${e.last_renewed || localToday()}" max="${localToday()}"></div>
+    <div class="field"><label>周期天数 *</label><input id="rn-cycle" type="number" min="1" value="${cycle}"></div>
+    <div class="field"><label>续期策略</label><select id="rn-policy">
+      <option value="extend_from_due" ${policy === 'extend_from_due' ? 'selected' : ''}>按原到期日顺延</option>
+      <option value="reset_from_payment" ${policy === 'reset_from_payment' ? 'selected' : ''}>按付款日重算</option>
+      <option value="manual_effective_date" ${policy === 'manual_effective_date' ? 'selected' : ''}>手动选择生效日</option>
+    </select></div>
+    <div class="field"><label>当前周期开始 *</label><input id="rn-start" type="date" value="${start}"></div>
+    <div class="field"><label>当前到期日 *</label><input id="rn-end" type="date" value="${end}"></div>
     <div class="field"><label>提前几天提醒</label><input id="rn-remind" type="number" min="0" value="${e.remind_before_days ?? 3}"></div>
     <div class="field"><label>备注（可选）</label><input id="rn-note" value="${esc(e.note || '')}"></div>
   </div>
@@ -192,6 +222,16 @@ function renderRenewForm() {
     <button class="btn" data-action="save">${state.editRenew ? '保存修改' : '添加'}</button>
     <button class="btn ghost" data-action="cancel">取消</button>
   </div></div>`;
+}
+
+function syncRenewEndFromStart() {
+  const start = document.getElementById('rn-start');
+  const cycle = document.getElementById('rn-cycle');
+  const end = document.getElementById('rn-end');
+  if (!start || !cycle || !end || !start.value) return;
+  const days = Number(cycle.value);
+  if (!(days > 0)) return;
+  end.value = addDaysLocal(start.value, days);
 }
 
 async function loadRenewals() {
@@ -211,18 +251,45 @@ async function saveRenew() {
   const v = (id) => document.getElementById(id).value;
   const body = {
     name: v('rn-name').trim(), url: v('rn-url').trim(),
-    cycle_days: Number(v('rn-cycle')), last_renewed: v('rn-last'),
+    cycle_days: Number(v('rn-cycle')),
+    current_period_start: v('rn-start'),
+    current_period_end: v('rn-end'),
+    renewal_policy: v('rn-policy'),
     remind_before_days: Number(v('rn-remind')), note: v('rn-note').trim(),
   };
   if (!body.name) return toast('请填写名称');
   if (!(body.cycle_days > 0)) return toast('周期天数需为正整数');
-  if (!body.last_renewed) return toast('请选择上次续期日期');
+  if (!body.current_period_start) return toast('请选择当前周期开始日期');
+  if (!body.current_period_end) return toast('请选择当前到期日');
   try {
     if (state.editRenew) await api(`/api/renewals/${state.editRenew.id}`, { method: 'PUT', body: JSON.stringify(body) });
     else await api('/api/renewals', { method: 'POST', body: JSON.stringify(body) });
     state.showRenewForm = false; state.editRenew = null;
     toast('已保存'); loadRenewals();
   } catch (err) { toast(err.message); }
+}
+
+function promptEffectiveDateFor(id) {
+  const rn = state.renewals.find((x) => x.id === id);
+  const defaultDate = (rn && (rn.current_period_end || rn.next_due)) || localToday();
+  const effectiveOn = prompt('请输入续期生效日（YYYY-MM-DD）', defaultDate);
+  if (!effectiveOn) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveOn)) {
+    toast('日期格式应为 YYYY-MM-DD');
+    return null;
+  }
+  return effectiveOn;
+}
+
+async function renewItem(id, policy, effectiveOn) {
+  const body = { paid_on: localToday(), policy };
+  if (effectiveOn) body.effective_on = effectiveOn;
+  const rn = await api(`/api/renewals/${id}/renew`, { method: 'POST', body: JSON.stringify(body) });
+  const end = rn.current_period_end || rn.next_due;
+  if (policy === 'reset_from_payment') toast(`已按今天重算，下次到期 ${end}`);
+  else if (policy === 'manual_effective_date') toast(`已更新，下次到期 ${end}`);
+  else toast(`已顺延，下次到期 ${end}`);
+  loadRenewals();
 }
 
 /* ---------- 管理 ---------- */
@@ -409,16 +476,41 @@ document.getElementById('view-renew').addEventListener('click', async (e) => {
     case 'cancel': state.showRenewForm = false; state.editRenew = null; { const b = document.getElementById('renewForm'); if (b) b.innerHTML = ''; } break;
     case 'edit': state.editRenew = state.renewals.find((x) => x.id === id) || null; state.showRenewForm = true; renderRenewForm(); window.scrollTo({ top: 0, behavior: 'smooth' }); break;
     case 'save': saveRenew(); break;
-    case 'renew':
-      try { await api(`/api/renewals/${id}/renew`, { method: 'POST', body: JSON.stringify({ date: localToday() }) }); toast('已续期，已重新计算下次到期'); loadRenewals(); }
+    case 'renew': {
+      const rn = state.renewals.find((x) => x.id === id);
+      const policy = (rn && rn.renewal_policy) || 'extend_from_due';
+      const effectiveOn = policy === 'manual_effective_date' ? promptEffectiveDateFor(id) : null;
+      if (policy === 'manual_effective_date' && !effectiveOn) break;
+      try {
+        await renewItem(id, policy, effectiveOn);
+      }
       catch (err) { toast(err.message); }
       break;
+    }
+    case 'renewToday':
+      try {
+        await renewItem(id, 'reset_from_payment');
+      }
+      catch (err) { toast(err.message); }
+      break;
+    case 'renewManual': {
+      const effectiveOn = promptEffectiveDateFor(id);
+      if (!effectiveOn) break;
+      try {
+        await renewItem(id, 'manual_effective_date', effectiveOn);
+      }
+      catch (err) { toast(err.message); }
+      break;
+    }
     case 'del':
       if (confirm('确定删除该续期项？')) {
         try { await api(`/api/renewals/${id}`, { method: 'DELETE' }); loadRenewals(); } catch (err) { toast(err.message); }
       }
       break;
   }
+});
+document.getElementById('view-renew').addEventListener('change', (e) => {
+  if (e.target.id === 'rn-start' || e.target.id === 'rn-cycle') syncRenewEndFromStart();
 });
 
 // 管理

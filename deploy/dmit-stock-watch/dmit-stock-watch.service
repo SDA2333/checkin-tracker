@@ -1,0 +1,36 @@
+[Unit]
+Description=DMIT stock watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dmit-stock-watch
+EnvironmentFile=/opt/dmit-stock-watch/.env
+ExecStart=/usr/bin/python3 /opt/dmit-stock-watch/watcher.py
+Restart=always
+RestartSec=5
+User=dmit-watch
+Group=dmit-watch
+StateDirectory=dmit-stock-watch
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/dmit-stock-watch
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
