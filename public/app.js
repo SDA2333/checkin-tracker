@@ -38,12 +38,130 @@ async function api(path, opts = {}) {
 }
 
 let toastTimer;
-function toast(msg) {
+/**
+ * 显示 toast。
+ * @param {string} msg 文本
+ * @param {'info'|'success'|'error'} [type] 类型（决定颜色/图标）
+ * @param {{label:string,onClick:Function,duration?:number}} [action] 可选的行动按钮（如「撤销」）
+ */
+function toast(msg, type = 'info', action = null) {
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
+  t.className = 'toast'; // 重置
+  t.textContent = '';
+  const span = document.createElement('span');
+  span.className = 'toast-msg';
+  span.textContent = msg;
+  t.appendChild(span);
+
+  if (action && action.label && typeof action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      clearTimeout(toastTimer);
+      t.classList.remove('show');
+      action.onClick();
+    });
+    t.appendChild(btn);
+  }
+
+  // 触发重排以重放动画
+  void t.offsetWidth;
+  t.classList.add('show', type);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 1900);
+  const dur = (action && action.duration) || 1900;
+  toastTimer = setTimeout(() => t.classList.remove('show'), dur);
 }
+const toastOk = (m, a) => toast(m, 'success', a);
+const toastErr = (m) => toast(m, 'error');
+
+/* ---------- 应用内 Modal（替换原生 confirm/prompt）---------- */
+let activeModalCleanup = null;
+function closeModal() {
+  const root = document.getElementById('modal-root');
+  const overlay = root.querySelector('.modal-overlay');
+  if (!overlay) return;
+  overlay.classList.add('closing');
+  if (activeModalCleanup) { activeModalCleanup(); activeModalCleanup = null; }
+  setTimeout(() => { root.innerHTML = ''; }, 160);
+}
+
+/**
+ * 通用 modal。返回 Promise，resolve 为 true/false 或输入值。
+ * @param {object} opts
+ * @param {string} opts.title 标题
+ * @param {string} [opts.message] 说明文本
+ * @param {string} [opts.confirmText] 确认按钮文字
+ * @param {string} [opts.cancelText] 取消按钮文字
+ * @param {boolean} [opts.danger] 确认按钮是否红色
+ * @param {'date'|'text'} [opts.input] 需要输入时的类型
+ * @param {string} [opts.inputValue] 输入初始值
+ * @param {string} [opts.inputLabel] 输入标签
+ */
+function openModal(opts) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    const prevFocus = document.activeElement;
+    const needInput = !!opts.input;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(opts.title || '')}">
+        <h3>${esc(opts.title || '')}</h3>
+        ${opts.message ? `<p>${esc(opts.message)}</p>` : ''}
+        ${needInput ? `<div class="field">
+          ${opts.inputLabel ? `<label>${esc(opts.inputLabel)}</label>` : ''}
+          <input id="modal-input" type="${opts.input}" value="${esc(opts.inputValue || '')}">
+        </div>` : ''}
+        <div class="modal-actions">
+          <button class="btn ghost" data-modal="cancel">${esc(opts.cancelText || '取消')}</button>
+          <button class="btn ${opts.danger ? 'danger' : ''}" data-modal="ok">${esc(opts.confirmText || '确定')}</button>
+        </div>
+      </div>`;
+    root.innerHTML = '';
+    root.appendChild(overlay);
+
+    const input = overlay.querySelector('#modal-input');
+    const okBtn = overlay.querySelector('[data-modal="ok"]');
+
+    const done = (val) => { closeModal(); if (prevFocus && prevFocus.focus) prevFocus.focus(); resolve(val); };
+    const onOk = () => {
+      if (needInput) {
+        const v = input.value.trim();
+        done(v || null);
+      } else done(true);
+    };
+    const onCancel = () => done(needInput ? null : false);
+
+    overlay.querySelector('[data-modal="ok"]').addEventListener('click', onOk);
+    overlay.querySelector('[data-modal="cancel"]').addEventListener('click', onCancel);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) onCancel(); });
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+      else if (e.key === 'Enter' && (needInput || document.activeElement === okBtn || document.activeElement.tagName !== 'BUTTON')) {
+        e.preventDefault(); onOk();
+      } else if (e.key === 'Tab') {
+        // 焦点陷阱
+        const f = overlay.querySelectorAll('button, input, [tabindex]');
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    activeModalCleanup = () => document.removeEventListener('keydown', onKey);
+
+    // 初始焦点
+    setTimeout(() => { (input || okBtn).focus(); if (input) input.select && input.select(); }, 40);
+  });
+}
+const confirmModal = (title, message, opts = {}) =>
+  openModal({ title, message, danger: opts.danger, confirmText: opts.confirmText || '确定', cancelText: '取消' });
+const promptDateModal = (title, value) =>
+  openModal({ title, input: 'date', inputValue: value, inputLabel: '生效日期', confirmText: '确定' });
 
 /* ---------- 状态 ---------- */
 const state = {
@@ -77,8 +195,8 @@ async function loadToday() {
       const sites = groups[cat];
       const groupItems = sites.map((s) => {
         const href = hrefOf(s.url);
-        return `<div class="checkitem ${s.done ? 'done' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}">
-          <div class="checkbox" aria-label="完成标记">${s.done ? '✓' : ''}</div>
+        return `<div class="checkitem ${s.done ? 'done' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}" role="button" tabindex="0" aria-pressed="${s.done ? 'true' : 'false'}" aria-label="${esc(s.name)}${s.done ? '，已签到' : '，未签到'}">
+          <div class="checkbox" aria-hidden="true"><span class="tick">${s.done ? '✓' : ''}</span></div>
           <div class="info">
             <div class="name">${esc(s.name)}</div>
             <div class="sub">
@@ -92,12 +210,12 @@ async function loadToday() {
       }).join('');
 
       return `<div class="group" data-category="${esc(cat)}">
-        <div class="group-header">
-          <span class="group-arrow">▼</span>
+        <div class="group-header" role="button" tabindex="0" aria-expanded="true">
+          <span class="group-arrow" aria-hidden="true">▼</span>
           <span class="group-title">${esc(cat)}</span>
           <span class="group-count">(${sites.length})</span>
         </div>
-        <div class="group-items">${groupItems}</div>
+        <div class="group-items"><div class="group-inner">${groupItems}</div></div>
       </div>`;
     }).join('');
   }
@@ -108,10 +226,16 @@ async function loadToday() {
       ${isToday ? '' : `<button class="btn ghost sm" data-action="backToday">回到今天</button>`}
       <div class="progress">
         <div class="row spread"><span class="muted">${isToday ? '今日进度' : esc(state.date)}</span><b>${data.doneCount}/${data.total}</b></div>
-        <div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="bar"><i style="width:0%"></i></div>
       </div>
     </div>
-    <div>${items}</div>`;
+    <div class="stagger">${items}</div>`;
+
+  // 进度条：下一帧再设宽度，让它从 0 缓动到目标值
+  requestAnimationFrame(() => {
+    const bar = view.querySelector('.progress .bar > i');
+    if (bar) bar.style.width = pct + '%';
+  });
 }
 
 /* ---------- 日历 ---------- */
@@ -144,7 +268,8 @@ async function loadCalendar() {
     if (data.activeTotal > 0 && cnt >= data.activeTotal) cls = 'full';
     else if (cnt > 0) cls = 'partial';
     if (c === today) cls += ' today';
-    return `<div class="cell ${cls}" data-date="${c}">
+    const future = c > today;
+    return `<div class="cell ${cls}" data-date="${c}" ${future ? '' : 'role="button" tabindex="0"'} aria-label="${c}${cnt > 0 ? '，已签 ' + cnt : ''}">
       <span>${Number(c.slice(8, 10))}</span>
       <span class="dot">${cnt > 0 ? cnt + '✓' : ''}</span>
     </div>`;
@@ -152,9 +277,9 @@ async function loadCalendar() {
 
   view.innerHTML = `
     <div class="cal-head">
-      <button class="btn ghost sm" data-action="prev">‹</button>
+      <button class="btn ghost sm" data-action="prev" aria-label="上一月">‹</button>
       <div class="title">${d0.getFullYear()}年${d0.getMonth() + 1}月</div>
-      <button class="btn ghost sm" data-action="next">›</button>
+      <button class="btn ghost sm" data-action="next" aria-label="下一月">›</button>
     </div>
     <div class="cal-grid">
       ${dows.map((d) => `<div class="dow">${d}</div>`).join('')}
@@ -187,10 +312,9 @@ function renewCard(rn) {
       ${rn.note ? `<div class="muted">${esc(rn.note)}</div>` : ''}
       <div class="renew-actions">
         <button class="btn sm" data-action="renew" data-id="${rn.id}">${renewButtonText(policy)}</button>
-        <button class="btn ghost sm" data-action="renewToday" data-id="${rn.id}">按今天重算</button>
-        <button class="btn ghost sm" data-action="renewManual" data-id="${rn.id}">选择生效日</button>
-        <button class="btn ghost sm" data-action="edit" data-id="${rn.id}">编辑</button>
-        <button class="btn danger sm" data-action="del" data-id="${rn.id}">删除</button>
+        <div class="menu-wrap">
+          <button class="btn ghost sm" data-action="menu" data-id="${rn.id}" aria-haspopup="true" aria-expanded="false">更多 ▾</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -331,12 +455,12 @@ async function loadRenewals() {
     const hasUrgent = items.some(r => r.status === 'overdue' || r.status === 'soon');
     return `
       <div class="group ${hasUrgent ? '' : 'collapsed'}">
-        <div class="group-header">
+        <div class="group-header" role="button" tabindex="0" aria-expanded="${hasUrgent ? 'true' : 'false'}">
           <span class="group-name">${esc(cat)} (${items.length})</span>
-          <span class="group-toggle">▼</span>
+          <span class="group-toggle" aria-hidden="true">▼</span>
         </div>
         <div class="group-content">
-          ${items.map(renewCard).join('')}
+          <div class="group-inner">${items.map(renewCard).join('')}</div>
         </div>
       </div>
     `;
@@ -345,7 +469,7 @@ async function loadRenewals() {
   view.innerHTML = `
     <div class="section-head"><h2>续期提醒</h2><button class="btn sm" data-action="add">+ 添加</button></div>
     <div id="renewForm"></div>
-    ${list.length ? groupsHtml
+    ${list.length ? `<div class="stagger">${groupsHtml}</div>`
       : `<div class="empty">还没有续期项。<br>把需要定期续期的东西加进来（如 40 天续期），到期会自动提醒。</div>`}`;
 
   // 根据状态决定是否显示表单
@@ -362,6 +486,7 @@ async function saveRenew() {
   if (saveBtn && saveBtn.disabled) return;
   if (saveBtn) saveBtn.disabled = true;
 
+  if (saveBtn) saveBtn.classList.add('loading');
   try {
     const v = (id) => document.getElementById(id).value;
     const body = {
@@ -374,10 +499,10 @@ async function saveRenew() {
       note: v('rn-note').trim(),
       category: v('rn-category').trim(),
     };
-    if (!body.name) return toast('请填写名称');
-    if (!(body.cycle_days > 0)) return toast('周期天数需为正整数');
-    if (!body.current_period_start) return toast('请选择当前周期开始日期');
-    if (!body.current_period_end) return toast('请选择当前到期日');
+    if (!body.name) return toastErr('请填写名称');
+    if (!(body.cycle_days > 0)) return toastErr('周期天数需为正整数');
+    if (!body.current_period_start) return toastErr('请选择当前周期开始日期');
+    if (!body.current_period_end) return toastErr('请选择当前到期日');
 
     if (state.editRenew) {
       await api(`/api/renewals/${state.editRenew.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -386,22 +511,22 @@ async function saveRenew() {
     }
     state.showRenewForm = false;
     state.editRenew = null;
-    toast('已保存');
+    toastOk('已保存');
     await loadRenewals();
   } catch (err) {
-    toast(err.message);
+    toastErr(err.message);
   } finally {
-    if (saveBtn) saveBtn.disabled = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('loading'); }
   }
 }
 
-function promptEffectiveDateFor(id) {
+async function promptEffectiveDateFor(id) {
   const rn = state.renewals.find((x) => x.id === id);
   const defaultDate = (rn && (rn.current_period_end || rn.next_due)) || localToday();
-  const effectiveOn = prompt('请输入续期生效日（YYYY-MM-DD）', defaultDate);
+  const effectiveOn = await promptDateModal('选择续期生效日', defaultDate);
   if (!effectiveOn) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveOn)) {
-    toast('日期格式应为 YYYY-MM-DD');
+    toastErr('日期格式应为 YYYY-MM-DD');
     return null;
   }
   return effectiveOn;
@@ -412,9 +537,9 @@ async function renewItem(id, policy, effectiveOn) {
   if (effectiveOn) body.effective_on = effectiveOn;
   const rn = await api(`/api/renewals/${id}/renew`, { method: 'POST', body: JSON.stringify(body) });
   const end = rn.current_period_end || rn.next_due;
-  if (policy === 'reset_from_payment') toast(`已按今天重算，下次到期 ${end}`);
-  else if (policy === 'manual_effective_date') toast(`已更新，下次到期 ${end}`);
-  else toast(`已顺延，下次到期 ${end}`);
+  if (policy === 'reset_from_payment') toastOk(`已按今天重算，下次到期 ${end}`);
+  else if (policy === 'manual_effective_date') toastOk(`已更新，下次到期 ${end}`);
+  else toastOk(`已顺延，下次到期 ${end}`);
   loadRenewals();
 }
 
@@ -467,22 +592,27 @@ async function loadManage() {
   view.innerHTML = `
     <div class="section-head"><h2>网站管理</h2><button class="btn sm" data-action="add">+ 添加网站</button></div>
     <div id="siteForm"></div>
-    ${active.length ? active.map((s, i) => manageItem(s, i, active.length)).join('')
+    ${active.length ? `<div class="stagger">${active.map((s, i) => manageItem(s, i, active.length)).join('')}</div>`
       : `<div class="empty">还没有网站，点右上角「添加网站」。</div>`}
-    ${archived.length ? `<h3 class="muted" style="margin:18px 2px 8px">已归档</h3>` + archived.map((s) => manageItem(s, -1, 0)).join('') : ''}`;
+    ${archived.length ? `<h3 class="muted" style="margin:18px 2px 8px">已归档</h3><div class="stagger">` + archived.map((s) => manageItem(s, -1, 0)).join('') + '</div>' : ''}`;
   if (state.showSiteForm || state.editSite) renderSiteForm();
 }
 
 async function saveSite() {
+  const saveBtn = document.querySelector('#siteForm [data-action="save"]');
   const v = (id) => document.getElementById(id).value;
   const body = { name: v('st-name').trim(), url: v('st-url').trim(), category: v('st-cat').trim(), frequency: v('st-freq') };
-  if (!body.name) return toast('请填写网站名称');
+  if (!body.name) return toastErr('请填写网站名称');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('loading'); }
   try {
     if (state.editSite) await api(`/api/sites/${state.editSite.id}`, { method: 'PUT', body: JSON.stringify(body) });
     else await api('/api/sites', { method: 'POST', body: JSON.stringify(body) });
     state.showSiteForm = false; state.editSite = null;
-    toast('已保存'); loadManage();
-  } catch (err) { toast(err.message); }
+    toastOk('已保存'); loadManage();
+  } catch (err) {
+    toastErr(err.message);
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('loading'); }
+  }
 }
 
 /* ---------- 续期角标 ---------- */
@@ -590,7 +720,7 @@ async function saveSettings() {
     .filter(Boolean);
 
   if (urls.length === 0) {
-    return toast('请至少配置一个 Bark URL');
+    return toastErr('请至少配置一个 Bark URL');
   }
 
   const config = {
@@ -602,37 +732,46 @@ async function saveSettings() {
     jumpUrl: document.getElementById('cfg-jump').value.trim(),
   };
 
+  const btn = document.querySelector('[data-action="save-settings"]');
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
   try {
     await api('/api/settings', { method: 'PUT', body: JSON.stringify(config) });
-    toast('配置已保存');
+    toastOk('配置已保存');
   } catch (err) {
-    toast('保存失败: ' + err.message);
+    toastErr('保存失败: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
   }
 }
 
 async function testPush() {
+  const btn = document.querySelector('[data-action="test-push"]');
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
   try {
-    toast('正在发送测试消息...');
     const result = await api('/api/settings/test', { method: 'POST' });
-    toast(`测试消息已发送到 ${result.sent_to}/${result.total} 个设备`);
+    toastOk(`测试消息已发送到 ${result.sent_to}/${result.total} 个设备`);
   } catch (err) {
-    toast('发送失败: ' + err.message);
+    toastErr('发送失败: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
   }
 }
 
 async function checkNow() {
+  const btn = document.querySelector('[data-action="check-now"]');
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
   try {
-    toast('正在检查续期项目...');
     const result = await api('/api/settings/check-now', { method: 'POST' });
-
     if (result.pending && result.pending.length > 0) {
-      toast(result.message);
+      toastOk(result.message);
       loadSettings(); // 刷新历史记录
     } else {
-      toast(result.message);
+      toast(result.message, 'info');
     }
   } catch (err) {
-    toast('检查失败: ' + err.message);
+    toastErr('检查失败: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
   }
 }
 
@@ -642,7 +781,7 @@ function switchTab(tab) {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
   document.getElementById('view-' + tab).classList.remove('hidden');
-  views[tab]().catch((err) => toast(err.message));
+  views[tab]().catch((err) => toastErr(err.message));
 }
 
 /* ---------- 事件绑定 ---------- */
@@ -664,32 +803,95 @@ bgToggle.addEventListener('click', () => {
   localStorage.setItem('bgEnabled', document.body.classList.contains('with-bg') ? '1' : '0');
 });
 
+// 主题切换（深色 / 浅色 / 跟随系统）
+const themeToggle = document.getElementById('themeToggle');
+function systemPrefersDark() {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function currentThemeIsDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return systemPrefersDark();
+}
+function syncThemeIcon() {
+  // 显示「点击后会切到的目标」的图标
+  themeToggle.textContent = currentThemeIsDark() ? '☀️' : '🌙';
+}
+themeToggle.addEventListener('click', () => {
+  const nextDark = !currentThemeIsDark();
+  document.documentElement.setAttribute('data-theme', nextDark ? 'dark' : 'light');
+  localStorage.setItem('theme', nextDark ? 'dark' : 'light');
+  syncThemeIcon();
+});
+// 跟随系统变化时更新图标（仅当用户未手动锁定）
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!localStorage.getItem('theme')) syncThemeIcon();
+  });
+}
+syncThemeIcon();
+
+// 折叠分组的通用函数（同步 aria-expanded）
+function toggleGroup(header) {
+  const group = header.closest('.group');
+  if (!group) return;
+  const collapsed = group.classList.toggle('collapsed');
+  header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+// 打卡切换（供点击与键盘复用）
+async function toggleCheckin(item) {
+  const id = Number(item.dataset.id);
+  const done = item.dataset.done === '1';
+  try {
+    await api('/api/checkins', {
+      method: done ? 'DELETE' : 'POST',
+      body: JSON.stringify({ site_id: id, date: state.date }),
+    });
+    await loadToday();
+    // 取消签到后给一次撤销机会
+    if (done) {
+      toast('已取消签到', 'info', {
+        label: '撤销', duration: 4000,
+        onClick: async () => {
+          try { await api('/api/checkins', { method: 'POST', body: JSON.stringify({ site_id: id, date: state.date }) }); await loadToday(); toastOk('已恢复签到'); }
+          catch (err) { toastErr(err.message); }
+        },
+      });
+    }
+  } catch (err) { toastErr(err.message); }
+}
+
 // 今日
 const todayView = document.getElementById('view-today');
 todayView.addEventListener('click', async (e) => {
   // 分组折叠/展开
   const header = e.target.closest('.group-header');
-  if (header) {
-    const group = header.closest('.group');
-    group.classList.toggle('collapsed');
-    return;
-  }
+  if (header) { toggleGroup(header); return; }
 
   const t = e.target.closest('[data-action]');
   if (t && t.dataset.action === 'go') {
-    // 点「去签到」时立刻打勾，静默提交打卡 API（不阻塞链接跳转）
+    // 点「去签到」时立刻打勾（乐观更新），后台提交；失败则回滚并提示
     const id = Number(t.dataset.id);
     const item = t.closest('.checkitem');
     if (item && item.dataset.done === '0') {
       item.classList.add('done');
       item.dataset.done = '1';
-      const box = item.querySelector('.checkbox');
-      if (box) box.textContent = '✓';
-      // 后台静默提交，失败也不影响用户继续操作（链接已经打开了）
+      item.setAttribute('aria-pressed', 'true');
+      const tick = item.querySelector('.checkbox .tick');
+      if (tick) tick.textContent = '✓';
       api('/api/checkins', {
         method: 'POST',
         body: JSON.stringify({ site_id: id, date: state.date }),
-      }).catch(() => {}); // 静默失败，用户刷新页面会看到真实状态
+      }).catch(() => {
+        // 失败回滚，让用户知道没签上
+        item.classList.remove('done');
+        item.dataset.done = '0';
+        item.setAttribute('aria-pressed', 'false');
+        if (tick) tick.textContent = '';
+        toastErr('签到未成功，请重试');
+      });
     }
     return; // 让浏览器处理 <a> 的默认跳转
   }
@@ -699,17 +901,15 @@ todayView.addEventListener('click', async (e) => {
   }
   // 点击卡片本体（非链接区域）切换勾选状态
   const item = e.target.closest('.checkitem');
-  if (item && !e.target.closest('a, button')) {
-    const id = Number(item.dataset.id);
-    const done = item.dataset.done === '1';
-    try {
-      await api('/api/checkins', {
-        method: done ? 'DELETE' : 'POST',
-        body: JSON.stringify({ site_id: id, date: state.date }),
-      });
-      loadToday();
-    } catch (err) { toast(err.message); }
-  }
+  if (item && !e.target.closest('a, button')) toggleCheckin(item);
+});
+// 键盘：Enter/Space 触发签到卡片与分组折叠
+todayView.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const header = e.target.closest('.group-header');
+  if (header) { e.preventDefault(); toggleGroup(header); return; }
+  const item = e.target.closest('.checkitem');
+  if (item) { e.preventDefault(); toggleCheckin(item); }
 });
 todayView.addEventListener('change', (e) => {
   if (e.target.id === 'datePick') { state.date = e.target.value || localToday(); loadToday(); }
@@ -717,6 +917,11 @@ todayView.addEventListener('change', (e) => {
 
 // 日历
 const calView = document.getElementById('view-calendar');
+function openCalCell(cell) {
+  if (cell.dataset.date > localToday()) return toast('不能给未来的日期签到', 'info');
+  state.date = cell.dataset.date;
+  switchTab('today');
+}
 calView.addEventListener('click', (e) => {
   const t = e.target.closest('[data-action]');
   if (t) {
@@ -726,38 +931,55 @@ calView.addEventListener('click', (e) => {
     return;
   }
   const cell = e.target.closest('.cell[data-date]');
-  if (cell) {
-    if (cell.dataset.date > localToday()) return toast('不能给未来的日期签到');
-    state.date = cell.dataset.date;
-    switchTab('today');
-  }
+  if (cell) openCalCell(cell);
+});
+calView.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const cell = e.target.closest('.cell[data-date]');
+  if (cell) { e.preventDefault(); openCalCell(cell); }
 });
 
-// 续期
-document.getElementById('view-renew').addEventListener('click', async (e) => {
-  // 分组折叠/展开
-  const header = e.target.closest('.group-header');
-  if (header) {
-    const group = header.closest('.group');
-    group.classList.toggle('collapsed');
-    return;
-  }
+// 关闭所有打开的「更多▾」下拉
+function closeRenewMenus() {
+  document.querySelectorAll('.menu-pop').forEach((m) => m.remove());
+  document.querySelectorAll('[data-action="menu"][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+}
 
-  const t = e.target.closest('[data-action]');
-  if (!t) return;
-  const id = t.dataset.id ? Number(t.dataset.id) : null;
-  switch (t.dataset.action) {
+// 打开某个续期卡片的「更多▾」下拉
+function openRenewMenu(btn, id) {
+  const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+  closeRenewMenus();
+  if (wasOpen) return;
+  btn.setAttribute('aria-expanded', 'true');
+  const pop = document.createElement('div');
+  pop.className = 'menu-pop';
+  pop.innerHTML = `
+    <button data-action="renewToday" data-id="${id}">按今天重算</button>
+    <button data-action="renewManual" data-id="${id}">选择生效日</button>
+    <button data-action="edit" data-id="${id}">编辑</button>
+    <button class="danger" data-action="del" data-id="${id}">删除</button>`;
+  btn.parentElement.appendChild(pop);
+}
+
+// 点击页面其他区域关闭下拉
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.menu-wrap')) closeRenewMenus();
+});
+
+async function handleRenewAction(action, id) {
+  switch (action) {
     case 'add':
       state.showRenewForm = true;
       state.editRenew = null;
       renderRenewForm();
       break;
-    case 'cancel':
+    case 'cancel': {
       state.showRenewForm = false;
       state.editRenew = null;
       const box = document.getElementById('renewForm');
       if (box) box.innerHTML = '';
       break;
+    }
     case 'accept-suggest': {
       const suggested = document.getElementById('suggest-text').textContent;
       document.getElementById('rn-category').value = suggested;
@@ -765,6 +987,7 @@ document.getElementById('view-renew').addEventListener('click', async (e) => {
       break;
     }
     case 'edit':
+      closeRenewMenus();
       state.editRenew = state.renewals.find((x) => x.id === id) || null;
       state.showRenewForm = false; // 编辑模式下不使用 showRenewForm
       renderRenewForm();
@@ -776,35 +999,54 @@ document.getElementById('view-renew').addEventListener('click', async (e) => {
     case 'renew': {
       const rn = state.renewals.find((x) => x.id === id);
       const policy = (rn && rn.renewal_policy) || 'extend_from_due';
-      const effectiveOn = policy === 'manual_effective_date' ? promptEffectiveDateFor(id) : null;
+      const effectiveOn = policy === 'manual_effective_date' ? await promptEffectiveDateFor(id) : null;
       if (policy === 'manual_effective_date' && !effectiveOn) break;
-      try {
-        await renewItem(id, policy, effectiveOn);
-      }
-      catch (err) { toast(err.message); }
+      try { await renewItem(id, policy, effectiveOn); } catch (err) { toastErr(err.message); }
       break;
     }
     case 'renewToday':
-      try {
-        await renewItem(id, 'reset_from_payment');
-      }
-      catch (err) { toast(err.message); }
+      closeRenewMenus();
+      try { await renewItem(id, 'reset_from_payment'); } catch (err) { toastErr(err.message); }
       break;
     case 'renewManual': {
-      const effectiveOn = promptEffectiveDateFor(id);
+      closeRenewMenus();
+      const effectiveOn = await promptEffectiveDateFor(id);
       if (!effectiveOn) break;
-      try {
-        await renewItem(id, 'manual_effective_date', effectiveOn);
-      }
-      catch (err) { toast(err.message); }
+      try { await renewItem(id, 'manual_effective_date', effectiveOn); } catch (err) { toastErr(err.message); }
       break;
     }
-    case 'del':
-      if (confirm('确定删除该续期项？')) {
-        try { await api(`/api/renewals/${id}`, { method: 'DELETE' }); loadRenewals(); } catch (err) { toast(err.message); }
+    case 'del': {
+      closeRenewMenus();
+      const rn = state.renewals.find((x) => x.id === id);
+      const ok = await confirmModal('删除续期项', `确定删除「${rn ? rn.name : '该项'}」？此操作不可撤销。`, { danger: true, confirmText: '删除' });
+      if (ok) {
+        try { await api(`/api/renewals/${id}`, { method: 'DELETE' }); loadRenewals(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
       }
       break;
+    }
   }
+}
+
+// 续期
+document.getElementById('view-renew').addEventListener('click', async (e) => {
+  // 分组折叠/展开
+  const header = e.target.closest('.group-header');
+  if (header) { toggleGroup(header); return; }
+
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const id = t.dataset.id ? Number(t.dataset.id) : null;
+  if (t.dataset.action === 'menu') { openRenewMenu(t, id); return; }
+  handleRenewAction(t.dataset.action, id);
+});
+document.getElementById('view-renew').addEventListener('keydown', (e) => {
+  // 表单内回车提交（select 除外，避免误触）
+  if (e.key === 'Enter' && e.target.closest('#renewForm') && e.target.tagName === 'INPUT') {
+    e.preventDefault(); saveRenew(); return;
+  }
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const header = e.target.closest('.group-header');
+  if (header) { e.preventDefault(); toggleGroup(header); }
 });
 document.getElementById('view-renew').addEventListener('change', (e) => {
   if (e.target.id === 'rn-start' || e.target.id === 'rn-cycle') syncRenewEndFromStart();
@@ -822,20 +1064,29 @@ document.getElementById('view-manage').addEventListener('click', async (e) => {
     case 'save': saveSite(); break;
     case 'archive': {
       const s = state.sites.find((x) => x.id === id);
-      try { await api(`/api/sites/${id}`, { method: 'PUT', body: JSON.stringify({ archived: s && s.archived ? 0 : 1 }) }); loadManage(); }
-      catch (err) { toast(err.message); }
+      try { await api(`/api/sites/${id}`, { method: 'PUT', body: JSON.stringify({ archived: s && s.archived ? 0 : 1 }) }); loadManage(); toastOk(s && s.archived ? '已恢复' : '已归档'); }
+      catch (err) { toastErr(err.message); }
       break;
     }
-    case 'del':
-      if (confirm('删除后该网站的打卡记录也会一并删除，确定？')) {
-        try { await api(`/api/sites/${id}`, { method: 'DELETE' }); loadManage(); } catch (err) { toast(err.message); }
+    case 'del': {
+      const s = state.sites.find((x) => x.id === id);
+      const ok = await confirmModal('删除网站', `删除「${s ? s.name : '该网站'}」后，它的所有打卡记录也会一并删除，且不可撤销。确定吗？`, { danger: true, confirmText: '删除' });
+      if (ok) {
+        try { await api(`/api/sites/${id}`, { method: 'DELETE' }); loadManage(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
       }
       break;
+    }
     case 'up':
     case 'down':
       try { await api(`/api/sites/${id}/move`, { method: 'POST', body: JSON.stringify({ dir: t.dataset.action }) }); loadManage(); }
-      catch (err) { toast(err.message); }
+      catch (err) { toastErr(err.message); }
       break;
+  }
+});
+// 管理表单：回车提交
+document.getElementById('view-manage').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.closest('#siteForm') && e.target.tagName === 'INPUT') {
+    e.preventDefault(); saveSite();
   }
 });
 

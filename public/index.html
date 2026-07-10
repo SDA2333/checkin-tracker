@@ -6,6 +6,15 @@
   <title>签到清单</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>" />
   <link rel="stylesheet" href="/style.css" />
+  <script>
+    // 尽早应用主题，避免加载时闪烁（'light'|'dark'|null=跟随系统）
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -17,6 +26,7 @@
       <button data-tab="manage">管理</button>
       <button data-tab="settings">设置</button>
     </nav>
+    <button class="theme-toggle" id="themeToggle" title="切换深色/浅色" aria-label="切换深色/浅色">🌙</button>
     <button class="bg-toggle" id="bgToggle" title="切换背景">🖼️</button>
     <button class="logout" id="logout" title="退出登录">退出</button>
   </header>
@@ -29,7 +39,8 @@
     <section id="view-settings" class="view hidden"></section>
   </main>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="modal-root"></div>
 
   <script src="/app.js"></script>
 </body>

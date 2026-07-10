@@ -7,31 +7,59 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>" />
   <style>
     * { box-sizing: border-box; }
+    @keyframes bgFloat {
+      0%, 100% { background-position: 0% 50%; }
+      50%      { background-position: 100% 50%; }
+    }
+    @keyframes cardRise {
+      from { opacity: 0; transform: translateY(24px) scale(.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-1px); }
+      20%, 80% { transform: translateX(2px); }
+      30%, 50%, 70% { transform: translateX(-4px); }
+      40%, 60% { transform: translateX(4px); }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     body {
       margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
       font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #6366f1 100%);
+      background-size: 200% 200%; animation: bgFloat 14s ease infinite;
       color: #1e293b; padding: 20px;
     }
     .card {
       background: #fff; border-radius: 18px; padding: 36px 30px; width: 100%; max-width: 360px;
       box-shadow: 0 20px 50px rgba(0,0,0,.25);
+      animation: cardRise .5s cubic-bezier(.34,1.56,.64,1);
     }
+    .card.shake { animation: shake .5s; }
     h1 { margin: 0 0 4px; font-size: 26px; text-align: center; }
     p.sub { margin: 0 0 24px; text-align: center; color: #64748b; font-size: 14px; }
     label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; }
     input {
       width: 100%; padding: 12px 14px; font-size: 16px; border: 1.5px solid #e2e8f0;
-      border-radius: 10px; outline: none; transition: border-color .15s;
+      border-radius: 10px; outline: none; transition: border-color .15s, box-shadow .15s;
     }
-    input:focus { border-color: #6366f1; }
+    input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.18); }
     button {
       width: 100%; margin-top: 18px; padding: 12px; font-size: 16px; font-weight: 600;
       color: #fff; background: #6366f1; border: none; border-radius: 10px; cursor: pointer;
-      transition: background .15s;
+      transition: background .15s, transform .12s; position: relative;
     }
     button:hover { background: #4f46e5; }
+    button:active { transform: scale(.97); }
+    button.loading { color: transparent; pointer-events: none; }
+    button.loading::after {
+      content: ''; position: absolute; inset: 0; margin: auto; width: 17px; height: 17px;
+      border: 2px solid #fff; border-top-color: transparent; border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
     .err { margin-top: 14px; color: #dc2626; font-size: 14px; text-align: center; min-height: 20px; }
+    @media (prefers-reduced-motion: reduce) {
+      body, .card, .card.shake, button.loading::after { animation: none !important; }
+    }
   </style>
 </head>
 <body>
@@ -46,10 +74,19 @@
   <script>
     const form = document.getElementById('form');
     const err = document.getElementById('err');
+    const btn = form.querySelector('button');
+    function fail(msg) {
+      err.textContent = msg;
+      form.classList.remove('shake');
+      void form.offsetWidth; // 重排以重放动画
+      form.classList.add('shake');
+    }
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       err.textContent = '';
       const password = document.getElementById('pw').value;
+      btn.classList.add('loading');
+      btn.disabled = true;
       try {
         const res = await fetch('/api/login', {
           method: 'POST',
@@ -58,9 +95,12 @@
         });
         if (res.ok) { location.href = '/'; return; }
         const data = await res.json().catch(() => ({}));
-        err.textContent = data.error || '登录失败';
+        fail(data.error || '登录失败');
       } catch {
-        err.textContent = '网络错误，请重试';
+        fail('网络错误，请重试');
+      } finally {
+        btn.classList.remove('loading');
+        btn.disabled = false;
       }
     });
   </script>
