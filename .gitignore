@@ -2,3 +2,17 @@ node_modules/
 data/
 .env
 *.log
+
+# 数据库备份（含用户数据，切勿进公开仓库）
+backups/
+*.db
+*.db-wal
+*.db-shm
+
+# 环境变量 / 代码备份产物
+.env.bak-*
+*.bak-*
+src.backup-*/
+
+# Python 缓存
+__pycache__/
