@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#6366f1" />
   <title>登录 · 签到清单</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>" />
   <style>
@@ -25,30 +26,47 @@
     body {
       margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
       font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #6366f1 100%);
-      background-size: 200% 200%; animation: bgFloat 14s ease infinite;
-      color: #1e293b; padding: 20px;
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #38bdf8 100%);
+      background-size: 220% 220%; animation: bgFloat 16s ease infinite;
+      color: #1e293b; padding: 20px; position: relative; overflow: hidden;
+    }
+    /* 柔和光斑，呼应主应用的环境光晕 */
+    body::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(40% 40% at 15% 20%, rgba(255,255,255,.35), transparent 60%),
+        radial-gradient(45% 45% at 85% 80%, rgba(255,255,255,.22), transparent 60%);
     }
     .card {
-      background: #fff; border-radius: 18px; padding: 36px 30px; width: 100%; max-width: 360px;
-      box-shadow: 0 20px 50px rgba(0,0,0,.25);
+      position: relative; z-index: 1;
+      background: rgba(255,255,255,.78); border: 1px solid rgba(255,255,255,.6);
+      border-radius: 22px; padding: 38px 32px; width: 100%; max-width: 360px;
+      box-shadow: 0 24px 60px rgba(30,27,75,.32);
+      -webkit-backdrop-filter: saturate(1.6) blur(20px); backdrop-filter: saturate(1.6) blur(20px);
       animation: cardRise .5s cubic-bezier(.34,1.56,.64,1);
     }
     .card.shake { animation: shake .5s; }
-    h1 { margin: 0 0 4px; font-size: 26px; text-align: center; }
-    p.sub { margin: 0 0 24px; text-align: center; color: #64748b; font-size: 14px; }
+    h1 {
+      margin: 0 0 4px; font-size: 27px; text-align: center; font-weight: 800; letter-spacing: -.02em;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    p.sub { margin: 0 0 26px; text-align: center; color: #64748b; font-size: 14px; }
     label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; }
     input {
       width: 100%; padding: 12px 14px; font-size: 16px; border: 1.5px solid #e2e8f0;
-      border-radius: 10px; outline: none; transition: border-color .15s, box-shadow .15s;
+      border-radius: 12px; outline: none; background: rgba(255,255,255,.7);
+      transition: border-color .15s, box-shadow .15s;
     }
     input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.18); }
     button {
-      width: 100%; margin-top: 18px; padding: 12px; font-size: 16px; font-weight: 600;
-      color: #fff; background: #6366f1; border: none; border-radius: 10px; cursor: pointer;
-      transition: background .15s, transform .12s; position: relative;
+      width: 100%; margin-top: 20px; padding: 13px; font-size: 16px; font-weight: 700;
+      color: #fff; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      border: none; border-radius: 12px; cursor: pointer;
+      box-shadow: 0 8px 22px -6px rgba(99,102,241,.6);
+      transition: filter .15s, transform .12s, box-shadow .2s; position: relative;
     }
-    button:hover { background: #4f46e5; }
+    button:hover { filter: brightness(1.06); box-shadow: 0 10px 28px -6px rgba(99,102,241,.7); }
     button:active { transform: scale(.97); }
     button.loading { color: transparent; pointer-events: none; }
     button.loading::after {

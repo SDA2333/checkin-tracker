@@ -286,9 +286,9 @@ async function loadCalendar() {
       ${cellHtml}
     </div>
     <div class="legend">
-      <span><i style="background:#dcfce7;border:1px solid #86efac"></i>全部完成</span>
-      <span><i style="background:#fef3c7;border:1px solid #fcd34d"></i>部分完成</span>
-      <span><i style="background:#fff;border:1px solid #e2e8f0"></i>未签</span>
+      <span><i style="background:var(--green-bg);border:1px solid color-mix(in srgb,var(--green) 45%,transparent)"></i>全部完成</span>
+      <span><i style="background:var(--amber-bg);border:1px solid color-mix(in srgb,var(--amber) 45%,transparent)"></i>部分完成</span>
+      <span><i style="background:var(--card);border:1px solid var(--line)"></i>未签</span>
     </div>
     <p class="muted" style="text-align:center;margin-top:10px">点某一天可查看 / 补签当天清单</p>`;
 }
@@ -303,7 +303,7 @@ function renewCard(rn) {
   const start = rn.current_period_start || rn.last_renewed;
   const end = rn.current_period_end || rn.next_due;
   const policy = rn.renewal_policy || 'extend_from_due';
-  return `<div class="card renew-card" data-id="${rn.id}">
+  return `<div class="card renew-card ${rn.status}" data-id="${rn.id}">
     <div class="badge ${rn.status}"><span>${big}</span><small>${small}</small></div>
     <div class="info">
       <div class="name">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(rn.name)} ↗</a>` : esc(rn.name)}</div>
