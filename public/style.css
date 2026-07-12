@@ -473,7 +473,8 @@ input:focus, select:focus {
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 5px; vertical-align: -1px; }
 
 /* ---- 续期 ---- */
-.renew-card { display: flex; align-items: center; gap: 14px; position: relative; overflow: hidden; }
+.renew-card { display: flex; align-items: center; gap: 14px; position: relative; overflow: visible; }
+.renew-card.menu-open { z-index: 2; }
 .renew-card::before {
   content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--muted); opacity: .5;
 }
@@ -508,7 +509,9 @@ input:focus, select:focus {
   display: flex;
   flex-direction: column;
   gap: 0;
+  overflow: visible;
 }
+.group.collapsed .group-content .group-inner { overflow: hidden; }
 .group-content .card {
   border-radius: 0;
   border-top: none;

@@ -942,6 +942,7 @@ calView.addEventListener('keydown', (e) => {
 // 关闭所有打开的「更多▾」下拉
 function closeRenewMenus() {
   document.querySelectorAll('.menu-pop').forEach((m) => m.remove());
+  document.querySelectorAll('.renew-card.menu-open').forEach((card) => card.classList.remove('menu-open'));
   document.querySelectorAll('[data-action="menu"][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
 }
 
@@ -951,6 +952,7 @@ function openRenewMenu(btn, id) {
   closeRenewMenus();
   if (wasOpen) return;
   btn.setAttribute('aria-expanded', 'true');
+  btn.closest('.renew-card')?.classList.add('menu-open');
   const pop = document.createElement('div');
   pop.className = 'menu-pop';
   pop.innerHTML = `
