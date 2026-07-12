@@ -31,6 +31,12 @@ const SECURE_COOKIE = String(process.env.SECURE_COOKIE || '').toLowerCase() === 
 const TRUST_PROXY = process.env.TRUST_PROXY;
 
 const app = express();
+const sessionCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: SECURE_COOKIE,
+  path: '/',
+};
 if (TRUST_PROXY) app.set('trust proxy', Number(TRUST_PROXY) || 1);
 
 // 安全响应头（允许内联脚本/样式，因登录页用了内联脚本、卡片用了内联样式）
@@ -74,16 +80,14 @@ app.post('/api/login', loginLimiter, (req, res) => {
   if (!checkPassword((req.body || {}).password))
     return res.status(401).json({ error: '密码错误' });
   res.cookie(cookieName, makeToken(), {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: SECURE_COOKIE,
+    ...sessionCookieOptions,
     maxAge: 30 * 86400 * 1000,
   });
   res.json({ ok: true });
 });
 
 app.post('/api/logout', (req, res) => {
-  res.clearCookie(cookieName);
+  res.clearCookie(cookieName, sessionCookieOptions);
   res.json({ ok: true });
 });
 
@@ -100,8 +104,18 @@ app.use('/api/checkins', requireAuth, checkinsRouter);
 app.use('/api/renewals', requireAuth, renewalsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
 
+app.use('/api', requireAuth, (req, res) => res.status(404).json({ error: 'API 不存在' }));
+
 // ---- 受保护的前端页面与静态资源 ----
 app.use(requireAuth, express.static(PUBLIC));
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON 请求体格式错误' });
+  if (err?.type === 'entity.too.large') return res.status(413).json({ error: '请求体过大' });
+  console.error('[server] 未处理错误:', err);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ error: '服务器内部错误' });
+});
 
 app.listen(PORT, HOST, () => {
   console.log(`签到清单已启动: http://${HOST}:${PORT}  (鉴权: ${authDisabled ? '关闭' : '开启'})`);

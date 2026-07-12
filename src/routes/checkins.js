@@ -1,14 +1,14 @@
 // 打卡：今日清单（含连续天数）、勾选/取消、日历汇总
 import { Router } from 'express';
 import db from '../db.js';
-import { addDays, DATE_RE } from '../dates.js';
+import { addDays, daysBetween, isoToday, isValidDate } from '../dates.js';
 
 const r = Router();
 
 // 今日（或指定日期）清单：返回所有在用网站 + 当天是否已签 + 连续天数
 r.get('/today', (req, res) => {
-  const date = String(req.query.date || '').slice(0, 10);
-  if (!DATE_RE.test(date)) return res.status(400).json({ error: '需要 date=YYYY-MM-DD' });
+  const date = String(req.query.date || '');
+  if (!isValidDate(date)) return res.status(400).json({ error: '需要有效的 date=YYYY-MM-DD' });
 
   const sites = db.prepare(`SELECT * FROM sites WHERE archived = 0 ORDER BY sort_order, id`).all();
   const checked = new Set(
@@ -47,10 +47,15 @@ r.get('/today', (req, res) => {
 // 勾选完成
 r.post('/', (req, res) => {
   const { site_id, date } = req.body || {};
-  if (!site_id || !DATE_RE.test(String(date)))
+  const siteId = Number(site_id);
+  if (!Number.isSafeInteger(siteId) || siteId <= 0 || !isValidDate(date))
     return res.status(400).json({ error: '需要 site_id 与 date' });
+  if (String(date) > isoToday()) return res.status(400).json({ error: '不能给未来日期签到' });
+  const site = db.prepare('SELECT id, archived FROM sites WHERE id = ?').get(siteId);
+  if (!site) return res.status(404).json({ error: '网站不存在' });
+  if (site.archived) return res.status(409).json({ error: '已归档网站不能签到' });
   db.prepare('INSERT OR IGNORE INTO checkins (site_id, date) VALUES (?, ?)').run(
-    Number(site_id),
+    siteId,
     String(date)
   );
   res.json({ ok: true });
@@ -60,9 +65,11 @@ r.post('/', (req, res) => {
 r.delete('/', (req, res) => {
   const src = { ...req.query, ...(req.body || {}) };
   const { site_id, date } = src;
-  if (!site_id || !date) return res.status(400).json({ error: '需要 site_id 与 date' });
+  const siteId = Number(site_id);
+  if (!Number.isSafeInteger(siteId) || siteId <= 0 || !isValidDate(date))
+    return res.status(400).json({ error: '需要 site_id 与有效日期' });
   db.prepare('DELETE FROM checkins WHERE site_id = ? AND date = ?').run(
-    Number(site_id),
+    siteId,
     String(date)
   );
   res.json({ ok: true });
@@ -70,12 +77,19 @@ r.delete('/', (req, res) => {
 
 // 日历汇总：返回区间内每天的打卡数量，以及当前在用网站总数
 r.get('/calendar', (req, res) => {
-  const from = String(req.query.from || '').slice(0, 10);
-  const to = String(req.query.to || '').slice(0, 10);
-  if (!DATE_RE.test(from) || !DATE_RE.test(to))
+  const from = String(req.query.from || '');
+  const to = String(req.query.to || '');
+  if (!isValidDate(from) || !isValidDate(to) || from > to)
     return res.status(400).json({ error: '需要 from 与 to（YYYY-MM-DD）' });
+  if (daysBetween(from, to) > 366) return res.status(400).json({ error: '日历查询范围不能超过 366 天' });
   const rows = db
-    .prepare('SELECT date, COUNT(*) AS c FROM checkins WHERE date BETWEEN ? AND ? GROUP BY date')
+    .prepare(
+      `SELECT c.date, COUNT(*) AS c
+       FROM checkins c
+       JOIN sites s ON s.id = c.site_id AND s.archived = 0
+       WHERE c.date BETWEEN ? AND ?
+       GROUP BY c.date`
+    )
     .all(from, to);
   const days = {};
   for (const row of rows) days[row.date] = row.c;

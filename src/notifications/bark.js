@@ -31,9 +31,10 @@ export async function sendBark(config, title, body) {
   const results = [];
 
   for (const url of urls) {
+    let timeoutId;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      timeoutId = setTimeout(() => controller.abort(), 20000);
 
       const res = await fetch(url, {
         method: 'POST',
@@ -41,8 +42,6 @@ export async function sendBark(config, title, body) {
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
 
       const text = await res.text();
       let result = {};
@@ -53,12 +52,16 @@ export async function sendBark(config, title, body) {
       }
 
       if (!res.ok || (result.code && result.code !== 200)) {
-        throw new Error(`HTTP ${res.status}: ${text}`);
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
       }
 
-      results.push({ url, success: true, response: result });
+      // Bark URL 通常包含设备密钥，不写入响应或历史日志。
+      results.push({ success: true, response: result });
     } catch (err) {
-      results.push({ url, success: false, error: err.message });
+      const message = err?.name === 'AbortError' ? '请求超时' : String(err?.message || err).slice(0, 500);
+      results.push({ success: false, error: message });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 

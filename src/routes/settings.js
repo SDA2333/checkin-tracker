@@ -6,6 +6,17 @@ import { checkAndNotify } from '../notifications/checker.js';
 import { getSchedulerStatus } from '../notifications/scheduler.js';
 
 const router = Router();
+const LEVELS = new Set(['active', 'timeSensitive', 'passive']);
+const ALLOWED_KEYS = new Set(['urls', 'group', 'level', 'icon', 'jumpUrl', 'title']);
+
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * GET /api/settings - 获取推送配置
@@ -26,14 +37,37 @@ router.get('/', (req, res) => {
 router.put('/', (req, res) => {
   try {
     const updates = req.body;
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+      return res.status(400).json({ error: '请求体必须是配置对象' });
+    }
+    const unknown = Object.keys(updates).find((key) => !ALLOWED_KEYS.has(key));
+    if (unknown) return res.status(400).json({ error: `不支持的配置项: ${unknown}` });
 
     // 验证 Bark URLs
-    if (updates.urls) {
+    if (updates.urls !== undefined) {
       if (!Array.isArray(updates.urls)) {
         return res.status(400).json({ error: 'urls 必须是数组' });
       }
+      if (updates.urls.some((url) => typeof url !== 'string')) {
+        return res.status(400).json({ error: '每个 Bark URL 都必须是字符串' });
+      }
       // 过滤空字符串
-      updates.urls = updates.urls.filter((url) => url && url.trim());
+      updates.urls = updates.urls.map((url) => url.trim()).filter(Boolean);
+      if (updates.urls.length > 10) return res.status(400).json({ error: 'Bark URL 最多配置 10 个' });
+      if (updates.urls.some((url) => !isHttpUrl(url)))
+        return res.status(400).json({ error: 'Bark URL 必须是有效的 HTTP(S) 地址' });
+    }
+    for (const key of ['group', 'icon', 'jumpUrl', 'title']) {
+      if (updates[key] !== undefined && typeof updates[key] !== 'string')
+        return res.status(400).json({ error: `${key} 必须是字符串` });
+      if (typeof updates[key] === 'string') updates[key] = updates[key].trim();
+      if (updates[key]?.length > 500) return res.status(400).json({ error: `${key} 过长` });
+    }
+    if (updates.level !== undefined && !LEVELS.has(updates.level))
+      return res.status(400).json({ error: 'level 配置无效' });
+    for (const key of ['icon', 'jumpUrl']) {
+      if (updates[key] && !isHttpUrl(updates[key]))
+        return res.status(400).json({ error: `${key} 必须是有效的 HTTP(S) 地址` });
     }
 
     updateSettings(updates);
@@ -92,7 +126,8 @@ router.post('/check-now', async (req, res) => {
  */
 router.get('/history', (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 30;
+    const parsed = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isSafeInteger(parsed) ? Math.min(Math.max(parsed, 1), 100) : 30;
     const history = getNotificationHistory(limit);
     res.json(history);
   } catch (err) {

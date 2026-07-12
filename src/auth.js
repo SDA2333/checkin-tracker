@@ -28,14 +28,16 @@ function sign(payload) {
 
 function verify(token) {
   if (!token || !token.includes('.')) return null;
-  const [body, mac] = token.split('.');
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [body, mac] = parts;
   const expected = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
   const a = Buffer.from(mac);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (payload.exp && Date.now() > payload.exp) return null;
+    if (payload.sub !== 'owner' || !Number.isFinite(payload.exp) || Date.now() >= payload.exp) return null;
     return payload;
   } catch {
     return null;
@@ -43,7 +45,7 @@ function verify(token) {
 }
 
 export function makeToken() {
-  return sign({ sub: 'owner', exp: Date.now() + TOKEN_TTL_MS });
+  return sign({ sub: 'owner', iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS });
 }
 
 export function checkPassword(input) {

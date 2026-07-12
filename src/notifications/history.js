@@ -18,13 +18,14 @@ export function getSettings() {
   }
 
   // 设置默认值
+  const levels = new Set(['active', 'timeSensitive', 'passive']);
   return {
-    urls: config.bark_urls || [],
-    group: config.bark_group || '签到清单',
-    level: config.bark_level || 'timeSensitive',
-    icon: config.bark_icon || '',
-    jumpUrl: config.bark_jump_url || '',
-    title: config.bark_title || '签到清单续期提醒',
+    urls: Array.isArray(config.bark_urls) ? config.bark_urls.filter((url) => typeof url === 'string') : [],
+    group: typeof config.bark_group === 'string' ? config.bark_group : '签到清单',
+    level: levels.has(config.bark_level) ? config.bark_level : 'timeSensitive',
+    icon: typeof config.bark_icon === 'string' ? config.bark_icon : '',
+    jumpUrl: typeof config.bark_jump_url === 'string' ? config.bark_jump_url : '',
+    title: typeof config.bark_title === 'string' ? config.bark_title : '签到清单续期提醒',
   };
 }
 
@@ -85,15 +86,22 @@ export function getNotificationHistory(limit = 30) {
     )
     .all(limit);
 
-  return rows.map((row) => ({
-    id: row.id,
-    date: row.sent_at,
-    items: JSON.parse(row.items || '[]'),
-    status: row.status,
-    error: row.error_msg,
-    results: JSON.parse(row.results || '[]'),
-    createdAt: row.created_at,
-  }));
+  const parseJson = (value, fallback) => {
+    try { return JSON.parse(value); } catch { return fallback; }
+  };
+  return rows.map((row) => {
+    const items = parseJson(row.items || '[]', []);
+    const results = parseJson(row.results || '[]', []);
+    return {
+      id: row.id,
+      date: row.sent_at,
+      items: Array.isArray(items) ? items : [],
+      status: row.status,
+      error: row.error_msg,
+      results: Array.isArray(results) ? results : [],
+      createdAt: row.created_at,
+    };
+  });
 }
 
 /**
@@ -102,20 +110,24 @@ export function getNotificationHistory(limit = 30) {
  * @returns {Set<number>} 已提醒的 ID 集合
  */
 export function getNotifiedToday(today) {
-  const row = db
+  const rows = db
     .prepare(
       `SELECT items FROM notification_logs
        WHERE sent_at = ? AND status = 'success'
-       ORDER BY id DESC LIMIT 1`
+       ORDER BY id DESC`
     )
-    .get(today);
+    .all(today);
 
-  if (!row) return new Set();
-
-  try {
-    const items = JSON.parse(row.items || '[]');
-    return new Set(items.map((item) => item.id));
-  } catch {
-    return new Set();
+  const ids = new Set();
+  for (const row of rows) {
+    try {
+      const items = JSON.parse(row.items || '[]');
+      for (const item of items) {
+        if (Number.isSafeInteger(item?.id)) ids.add(item.id);
+      }
+    } catch {
+      // 单条损坏日志不应影响其他成功记录的去重。
+    }
   }
+  return ids;
 }

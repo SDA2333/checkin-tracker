@@ -13,7 +13,16 @@ function addDaysLocal(s, n) { const d = parseYmd(s); d.setDate(d.getDate() + n);
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function hrefOf(u) { if (!u) return null; return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
+function hrefOf(u) {
+  if (!u) return null;
+  try {
+    const value = /^https?:\/\//i.test(u) ? u : 'https://' + u;
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
 function policyLabel(policy) {
   return ({
     extend_from_due: '按原到期日顺延',
@@ -83,7 +92,7 @@ function closeModal() {
   if (!overlay) return;
   overlay.classList.add('closing');
   if (activeModalCleanup) { activeModalCleanup(); activeModalCleanup = null; }
-  setTimeout(() => { root.innerHTML = ''; }, 160);
+  setTimeout(() => { if (overlay.isConnected) overlay.remove(); }, 160);
 }
 
 /**
@@ -101,6 +110,7 @@ function closeModal() {
 function openModal(opts) {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
+    if (activeModalCleanup) { activeModalCleanup(); activeModalCleanup = null; }
     const prevFocus = document.activeElement;
     const needInput = !!opts.input;
 
@@ -307,8 +317,8 @@ function renewCard(rn) {
     <div class="badge ${rn.status}"><span>${big}</span><small>${small}</small></div>
     <div class="info">
       <div class="name">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(rn.name)} ↗</a>` : esc(rn.name)}</div>
-      <div class="muted">周期 ${rn.cycle_days} 天 · 当前到期 ${end} · ${policyLabel(policy)}</div>
-      <div class="muted">当前周期 ${start} → ${end}</div>
+      <div class="muted">周期 ${rn.cycle_days} 天 · 当前到期 ${esc(end)} · ${policyLabel(policy)}</div>
+      <div class="muted">当前周期 ${esc(start)} → ${esc(end)}</div>
       ${rn.note ? `<div class="muted">${esc(rn.note)}</div>` : ''}
       <div class="renew-actions">
         <button class="btn sm" data-action="renew" data-id="${rn.id}">${renewButtonText(policy)}</button>
@@ -648,7 +658,7 @@ async function loadSettings() {
           return `<div class="history-item ${statusClass}">
             <div class="history-header">
               <span class="history-status">${statusIcon}</span>
-              <span class="history-date">${h.date}</span>
+              <span class="history-date">${esc(h.date)}</span>
               <span class="history-count">${itemCount} 项</span>
             </div>
             ${h.error ? `<div class="history-error">${esc(h.error)}</div>` : ''}
@@ -1022,7 +1032,7 @@ async function handleRenewAction(action, id) {
       const rn = state.renewals.find((x) => x.id === id);
       const ok = await confirmModal('删除续期项', `确定删除「${rn ? rn.name : '该项'}」？此操作不可撤销。`, { danger: true, confirmText: '删除' });
       if (ok) {
-        try { await api(`/api/renewals/${id}`, { method: 'DELETE' }); loadRenewals(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
+        try { await api(`/api/renewals/${id}`, { method: 'DELETE' }); await loadRenewals(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
       }
       break;
     }
@@ -1066,7 +1076,7 @@ document.getElementById('view-manage').addEventListener('click', async (e) => {
     case 'save': saveSite(); break;
     case 'archive': {
       const s = state.sites.find((x) => x.id === id);
-      try { await api(`/api/sites/${id}`, { method: 'PUT', body: JSON.stringify({ archived: s && s.archived ? 0 : 1 }) }); loadManage(); toastOk(s && s.archived ? '已恢复' : '已归档'); }
+      try { await api(`/api/sites/${id}`, { method: 'PUT', body: JSON.stringify({ archived: s && s.archived ? 0 : 1 }) }); await loadManage(); toastOk(s && s.archived ? '已恢复' : '已归档'); }
       catch (err) { toastErr(err.message); }
       break;
     }
@@ -1074,13 +1084,13 @@ document.getElementById('view-manage').addEventListener('click', async (e) => {
       const s = state.sites.find((x) => x.id === id);
       const ok = await confirmModal('删除网站', `删除「${s ? s.name : '该网站'}」后，它的所有打卡记录也会一并删除，且不可撤销。确定吗？`, { danger: true, confirmText: '删除' });
       if (ok) {
-        try { await api(`/api/sites/${id}`, { method: 'DELETE' }); loadManage(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
+        try { await api(`/api/sites/${id}`, { method: 'DELETE' }); await loadManage(); toastOk('已删除'); } catch (err) { toastErr(err.message); }
       }
       break;
     }
     case 'up':
     case 'down':
-      try { await api(`/api/sites/${id}/move`, { method: 'POST', body: JSON.stringify({ dir: t.dataset.action }) }); loadManage(); }
+      try { await api(`/api/sites/${id}/move`, { method: 'POST', body: JSON.stringify({ dir: t.dataset.action }) }); await loadManage(); }
       catch (err) { toastErr(err.message); }
       break;
   }

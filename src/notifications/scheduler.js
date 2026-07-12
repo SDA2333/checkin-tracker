@@ -1,12 +1,13 @@
 // 定时任务调度器
 import cron from 'node-cron';
 import { checkAndNotify } from './checker.js';
+import { businessTimeZone } from '../dates.js';
 
 let schedulerTask = null;
 
 /**
  * 启动定时调度器
- * 默认每天北京时间 09:00 检查续期提醒
+ * 默认每天业务时区 09:00 检查续期提醒
  */
 export function startScheduler() {
   if (schedulerTask) {
@@ -14,7 +15,8 @@ export function startScheduler() {
     return;
   }
 
-  // 每天 09:00 (Asia/Shanghai 时区)
+  const timezone = businessTimeZone();
+  // 每天 09:00（业务时区）
   schedulerTask = cron.schedule(
     '0 9 * * *',
     async () => {
@@ -27,11 +29,11 @@ export function startScheduler() {
     },
     {
       scheduled: true,
-      timezone: 'Asia/Shanghai',
+      timezone,
     }
   );
 
-  console.log('[scheduler] 续期提醒调度器已启动 (每天 09:00)');
+  console.log(`[scheduler] 续期提醒调度器已启动 (每天 09:00 · ${timezone})`);
 }
 
 /**
@@ -49,8 +51,10 @@ export function stopScheduler() {
  * 获取调度器状态
  */
 export function getSchedulerStatus() {
+  const timezone = businessTimeZone();
   return {
     running: schedulerTask !== null,
-    schedule: '每天 09:00 (Asia/Shanghai)',
+    schedule: `每天 09:00 (${timezone})`,
+    timezone,
   };
 }

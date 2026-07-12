@@ -1,10 +1,18 @@
 // 续期项 CRUD + 到期计算 + 一键续期
 import { Router } from 'express';
 import db from '../db.js';
-import { addDays, daysBetween, isoToday, DATE_RE } from '../dates.js';
+import { addDays, daysBetween, isoToday, isValidDate } from '../dates.js';
 
 const r = Router();
 const POLICIES = new Set(['extend_from_due', 'reset_from_payment', 'manual_effective_date']);
+const MAX_NAME = 200;
+const MAX_URL = 2048;
+const MAX_CATEGORY = 100;
+const MAX_NOTE = 2000;
+
+function textTooLong(value, max) {
+  return value !== undefined && String(value).length > max;
+}
 
 function periodStart(row) {
   return row.current_period_start || row.last_renewed;
@@ -38,7 +46,7 @@ function decorate(row, today) {
 
 // 列表，按剩余天数升序（最紧急在前）
 r.get('/', (req, res) => {
-  const today = DATE_RE.test(String(req.query.today)) ? String(req.query.today) : isoToday();
+  const today = isValidDate(req.query.today) ? String(req.query.today) : isoToday();
   const where = req.query.archived === '1' ? '' : 'WHERE archived = 0';
   const rows = db.prepare(`SELECT * FROM renewals ${where}`).all();
   res.json(rows.map((x) => decorate(x, today)).sort((a, b) => a.days_left - b.days_left));
@@ -59,21 +67,26 @@ r.post('/', (req, res) => {
     category = '',
   } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: '名称不能为空' });
+  if (textTooLong(name, MAX_NAME) || textTooLong(url, MAX_URL) || textTooLong(category, MAX_CATEGORY) || textTooLong(note, MAX_NOTE))
+    return res.status(400).json({ error: '文本字段过长' });
   const cycle = Number(cycle_days);
-  if (!Number.isFinite(cycle) || cycle <= 0)
+  if (!Number.isSafeInteger(cycle) || cycle <= 0)
     return res.status(400).json({ error: '周期天数需为正整数' });
-  const start = String(current_period_start || last_renewed || '').slice(0, 10);
-  if (!DATE_RE.test(start)) return res.status(400).json({ error: '需要当前周期开始日期（YYYY-MM-DD）' });
-  const end = String(current_period_end || addDays(start, cycle)).slice(0, 10);
-  if (!DATE_RE.test(end)) return res.status(400).json({ error: '当前到期日期格式错误' });
-  const policy = normalizePolicy(String(renewal_policy));
-  const info = db
-    .prepare(
+  const start = String(current_period_start || last_renewed || '');
+  if (!isValidDate(start)) return res.status(400).json({ error: '需要当前周期开始日期（YYYY-MM-DD）' });
+  const end = String(current_period_end || addDays(start, cycle));
+  if (!isValidDate(end) || end < start) return res.status(400).json({ error: '当前到期日期无效' });
+  const remindDays = Number(remind_before_days);
+  if (!Number.isSafeInteger(remindDays) || remindDays < 0)
+    return res.status(400).json({ error: '提醒天数需为非负整数' });
+  if (!POLICIES.has(String(renewal_policy))) return res.status(400).json({ error: '续期策略不支持' });
+  const policy = String(renewal_policy);
+  const createRenewal = db.transaction(() => {
+    const info = db.prepare(
       `INSERT INTO renewals
        (name, url, cycle_days, last_renewed, current_period_start, current_period_end, renewal_policy, remind_before_days, note, category)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+    ).run(
       String(name).trim(),
       String(url).trim(),
       cycle,
@@ -81,21 +94,24 @@ r.post('/', (req, res) => {
       start,
       end,
       policy,
-      Number(remind_before_days) || 0,
+      remindDays,
       String(note),
       String(category).trim()
     );
-  db.prepare(
-    `INSERT INTO renewal_history
-     (renewal_id, renewed_on, paid_on, effective_on, new_period_start, new_period_end, policy_used, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(info.lastInsertRowid, start, start, start, start, end, 'initial', 'initial period');
-  res.json(decorate(db.prepare('SELECT * FROM renewals WHERE id = ?').get(info.lastInsertRowid), start));
+    db.prepare(
+      `INSERT INTO renewal_history
+       (renewal_id, renewed_on, paid_on, effective_on, new_period_start, new_period_end, policy_used, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(info.lastInsertRowid, start, start, start, start, end, 'initial', 'initial period');
+    return db.prepare('SELECT * FROM renewals WHERE id = ?').get(info.lastInsertRowid);
+  });
+  res.json(decorate(createRenewal(), start));
 });
 
 // 修改
 r.put('/:id', (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
   const cur = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
   if (!cur) return res.status(404).json({ error: '不存在' });
   const {
@@ -111,19 +127,30 @@ r.put('/:id', (req, res) => {
     category,
     archived,
   } = req.body || {};
+  if (name !== undefined && !String(name).trim())
+    return res.status(400).json({ error: '名称不能为空' });
+  if (textTooLong(name, MAX_NAME) || textTooLong(url, MAX_URL) || textTooLong(category, MAX_CATEGORY) || textTooLong(note, MAX_NOTE))
+    return res.status(400).json({ error: '文本字段过长' });
   if (cycle_days !== undefined) {
     const cycle = Number(cycle_days);
-    if (!Number.isFinite(cycle) || cycle <= 0)
+    if (!Number.isSafeInteger(cycle) || cycle <= 0)
       return res.status(400).json({ error: '周期天数需为正整数' });
   }
-  if (last_renewed !== undefined && !DATE_RE.test(String(last_renewed)))
+  if (last_renewed !== undefined && !isValidDate(last_renewed))
     return res.status(400).json({ error: '上次续期日期格式错误' });
-  if (current_period_start !== undefined && !DATE_RE.test(String(current_period_start)))
+  if (current_period_start !== undefined && !isValidDate(current_period_start))
     return res.status(400).json({ error: '当前周期开始日期格式错误' });
-  if (current_period_end !== undefined && !DATE_RE.test(String(current_period_end)))
+  if (current_period_end !== undefined && !isValidDate(current_period_end))
     return res.status(400).json({ error: '当前到期日期格式错误' });
   if (renewal_policy !== undefined && !POLICIES.has(String(renewal_policy)))
     return res.status(400).json({ error: '续期策略不支持' });
+  if (remind_before_days !== undefined) {
+    const remind = Number(remind_before_days);
+    if (!Number.isSafeInteger(remind) || remind < 0)
+      return res.status(400).json({ error: '提醒天数需为非负整数' });
+  }
+  if (archived !== undefined && typeof archived !== 'boolean' && archived !== 0 && archived !== 1)
+    return res.status(400).json({ error: 'archived 必须是布尔值' });
   const nextStart =
     current_period_start !== undefined
       ? String(current_period_start)
@@ -136,6 +163,7 @@ r.put('/:id', (req, res) => {
       : cycle_days !== undefined || current_period_start !== undefined || last_renewed !== undefined
         ? addDays(nextStart, cycle_days !== undefined ? Number(cycle_days) : cur.cycle_days)
         : periodEnd(cur);
+  if (nextEnd < nextStart) return res.status(400).json({ error: '当前到期日不能早于周期开始日' });
   db.prepare(
     `UPDATE renewals
      SET name=?, url=?, cycle_days=?, last_renewed=?, current_period_start=?, current_period_end=?, renewal_policy=?,
@@ -149,7 +177,7 @@ r.put('/:id', (req, res) => {
     nextStart,
     nextEnd,
     renewal_policy !== undefined ? String(renewal_policy) : normalizePolicy(cur.renewal_policy),
-    remind_before_days !== undefined ? Number(remind_before_days) || 0 : cur.remind_before_days,
+    remind_before_days !== undefined ? Number(remind_before_days) : cur.remind_before_days,
     note !== undefined ? String(note) : cur.note,
     category !== undefined ? String(category).trim() : (cur.category || ''),
     archived !== undefined ? (archived ? 1 : 0) : cur.archived,
@@ -161,11 +189,14 @@ r.put('/:id', (req, res) => {
 // 一键续期：记录实际付款日，并按策略推进服务周期
 r.post('/:id/renew', (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
   const cur = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
   if (!cur) return res.status(404).json({ error: '不存在' });
   const body = req.body || {};
-  const paidDate = String(body.paid_on || body.date || '').slice(0, 10);
-  const paidOn = DATE_RE.test(paidDate) ? paidDate : isoToday();
+  const paidDate = String(body.paid_on || body.date || '');
+  if ((body.paid_on !== undefined || body.date !== undefined) && !isValidDate(paidDate))
+    return res.status(400).json({ error: '付款日期格式错误' });
+  const paidOn = isValidDate(paidDate) ? paidDate : isoToday();
   if (body.policy !== undefined && !POLICIES.has(String(body.policy)))
     return res.status(400).json({ error: '续期策略不支持' });
   const policy = normalizePolicy(String(body.policy || cur.renewal_policy), normalizePolicy(cur.renewal_policy));
@@ -174,8 +205,8 @@ r.post('/:id/renew', (req, res) => {
   let effectiveOn;
 
   if (policy === 'manual_effective_date') {
-    const manualDate = String(body.effective_on || '').slice(0, 10);
-    if (!DATE_RE.test(manualDate)) return res.status(400).json({ error: '请选择生效日期（YYYY-MM-DD）' });
+    const manualDate = String(body.effective_on || '');
+    if (!isValidDate(manualDate)) return res.status(400).json({ error: '请选择生效日期（YYYY-MM-DD）' });
     effectiveOn = manualDate;
   } else if (policy === 'reset_from_payment') {
     effectiveOn = paidOn;
@@ -193,23 +224,29 @@ r.post('/:id/renew', (req, res) => {
           ? '手动选择生效日'
           : '';
 
-  db.prepare(
-    `UPDATE renewals
-     SET last_renewed = ?, current_period_start = ?, current_period_end = ?, renewal_policy = ?
-     WHERE id = ?`
-  ).run(effectiveOn, effectiveOn, newEnd, policy, id);
-  db.prepare(
-    `INSERT INTO renewal_history
-     (renewal_id, renewed_on, paid_on, effective_on, previous_period_start, previous_period_end,
-      new_period_start, new_period_end, policy_used, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, paidOn, paidOn, effectiveOn, previousStart, previousEnd, effectiveOn, newEnd, policy, historyNote);
-  res.json(decorate(db.prepare('SELECT * FROM renewals WHERE id = ?').get(id), paidOn));
+  const applyRenewal = db.transaction(() => {
+    db.prepare(
+      `UPDATE renewals
+       SET last_renewed = ?, current_period_start = ?, current_period_end = ?, renewal_policy = ?
+       WHERE id = ?`
+    ).run(effectiveOn, effectiveOn, newEnd, policy, id);
+    db.prepare(
+      `INSERT INTO renewal_history
+       (renewal_id, renewed_on, paid_on, effective_on, previous_period_start, previous_period_end,
+        new_period_start, new_period_end, policy_used, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, paidOn, paidOn, effectiveOn, previousStart, previousEnd, effectiveOn, newEnd, policy, historyNote);
+    return db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+  });
+  res.json(decorate(applyRenewal(), paidOn));
 });
 
 // 续期历史
 r.get('/:id/history', (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
+  const renewal = db.prepare('SELECT id FROM renewals WHERE id = ?').get(id);
+  if (!renewal) return res.status(404).json({ error: '不存在' });
   res.json(
     db
       .prepare(
@@ -223,7 +260,10 @@ r.get('/:id/history', (req, res) => {
 
 // 删除
 r.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM renewals WHERE id = ?').run(Number(req.params.id));
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
+  const result = db.prepare('DELETE FROM renewals WHERE id = ?').run(id);
+  if (result.changes === 0) return res.status(404).json({ error: '不存在' });
   res.json({ ok: true });
 });
 

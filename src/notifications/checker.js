@@ -1,28 +1,11 @@
 // 续期检查逻辑
 import db from '../db.js';
+import { addDays, daysBetween, isoToday } from '../dates.js';
 import { sendBark } from './bark.js';
 import { getSettings, logNotification, getNotifiedToday } from './history.js';
 
 const OVERDUE_GRACE_DAYS = 2; // 过期后再提醒几天
-
-/**
- * 计算两个日期之间的天数差
- */
-function daysBetween(dateStr1, dateStr2) {
-  const d1 = new Date(dateStr1);
-  const d2 = new Date(dateStr2);
-  const diff = d2 - d1;
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
-
-/**
- * 日期加天数
- */
-function addDays(dateStr, days) {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+let activeCheck = null;
 
 /**
  * 计算单个续期项的提醒信息
@@ -84,8 +67,8 @@ function buildMessage(alerts, today) {
  * 检查并推送续期提醒
  * @returns {Promise<Object>} 推送结果
  */
-export async function checkAndNotify() {
-  const today = new Date().toISOString().slice(0, 10);
+async function runCheckAndNotify() {
+  const today = isoToday();
 
   // 获取所有未归档的续期项
   const renewals = db
@@ -170,4 +153,12 @@ export async function checkAndNotify() {
       error: err.message,
     };
   }
+}
+
+export function checkAndNotify() {
+  if (activeCheck) return activeCheck;
+  activeCheck = runCheckAndNotify().finally(() => {
+    activeCheck = null;
+  });
+  return activeCheck;
 }
