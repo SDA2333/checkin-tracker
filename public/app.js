@@ -274,12 +274,13 @@ async function loadCalendar() {
   const cellHtml = cells.map((c) => {
     if (!c) return `<div class="cell empty"></div>`;
     const cnt = data.days[c] || 0;
+    const total = data.totals?.[c] ?? data.activeTotal;
     let cls = '';
-    if (data.activeTotal > 0 && cnt >= data.activeTotal) cls = 'full';
+    if (total > 0 && cnt >= total) cls = 'full';
     else if (cnt > 0) cls = 'partial';
     if (c === today) cls += ' today';
     const future = c > today;
-    return `<div class="cell ${cls}" data-date="${c}" ${future ? '' : 'role="button" tabindex="0"'} aria-label="${c}${cnt > 0 ? '，已签 ' + cnt : ''}">
+    return `<div class="cell ${cls}" data-date="${c}" ${future ? '' : 'role="button" tabindex="0"'} aria-label="${c}${total > 0 ? `，已签 ${cnt}/${total}` : ''}">
       <span>${Number(c.slice(8, 10))}</span>
       <span class="dot">${cnt > 0 ? cnt + '✓' : ''}</span>
     </div>`;

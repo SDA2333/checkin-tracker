@@ -10,7 +10,9 @@ r.get('/today', (req, res) => {
   const date = String(req.query.date || '');
   if (!isValidDate(date)) return res.status(400).json({ error: '需要有效的 date=YYYY-MM-DD' });
 
-  const sites = db.prepare(`SELECT * FROM sites WHERE archived = 0 ORDER BY sort_order, id`).all();
+  const sites = db
+    .prepare(`SELECT * FROM sites WHERE archived = 0 AND active_from <= ? ORDER BY sort_order, id`)
+    .all(date);
   const checked = new Set(
     db.prepare('SELECT site_id FROM checkins WHERE date = ?').all(date).map((x) => x.site_id)
   );
@@ -51,9 +53,10 @@ r.post('/', (req, res) => {
   if (!Number.isSafeInteger(siteId) || siteId <= 0 || !isValidDate(date))
     return res.status(400).json({ error: '需要 site_id 与 date' });
   if (String(date) > isoToday()) return res.status(400).json({ error: '不能给未来日期签到' });
-  const site = db.prepare('SELECT id, archived FROM sites WHERE id = ?').get(siteId);
+  const site = db.prepare('SELECT id, archived, active_from FROM sites WHERE id = ?').get(siteId);
   if (!site) return res.status(404).json({ error: '网站不存在' });
   if (site.archived) return res.status(409).json({ error: '已归档网站不能签到' });
+  if (String(date) < site.active_from) return res.status(409).json({ error: '不能在网站启用日期之前签到' });
   db.prepare('INSERT OR IGNORE INTO checkins (site_id, date) VALUES (?, ?)').run(
     siteId,
     String(date)
@@ -86,7 +89,7 @@ r.get('/calendar', (req, res) => {
     .prepare(
       `SELECT c.date, COUNT(*) AS c
        FROM checkins c
-       JOIN sites s ON s.id = c.site_id AND s.archived = 0
+       JOIN sites s ON s.id = c.site_id AND s.archived = 0 AND s.active_from <= c.date
        WHERE c.date BETWEEN ? AND ?
        GROUP BY c.date`
     )
@@ -94,7 +97,26 @@ r.get('/calendar', (req, res) => {
   const days = {};
   for (const row of rows) days[row.date] = row.c;
   const activeTotal = db.prepare('SELECT COUNT(*) AS c FROM sites WHERE archived = 0').get().c;
-  res.json({ from, to, activeTotal, days });
+  const starts = db
+    .prepare(
+      `SELECT active_from, COUNT(*) AS c
+       FROM sites
+       WHERE archived = 0 AND active_from <= ?
+       GROUP BY active_from
+       ORDER BY active_from`
+    )
+    .all(to);
+  const increments = new Map(starts.map((row) => [row.active_from, row.c]));
+  const beforeRange = starts
+    .filter((row) => row.active_from < from)
+    .reduce((sum, row) => sum + row.c, 0);
+  const totals = {};
+  let runningTotal = beforeRange;
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    runningTotal += increments.get(date) || 0;
+    totals[date] = runningTotal;
+  }
+  res.json({ from, to, activeTotal, totals, days });
 });
 
 export default r;

@@ -87,11 +87,26 @@ test('route validation prevents invalid data and database errors', async (t) => 
   });
 
   await t.test('excludes archived sites from check-ins and calendar counts', async () => {
+    db.prepare('UPDATE sites SET active_from = ? WHERE id = ?').run('2026-01-01', siteId);
     const checked = await request('/checkins', {
       method: 'POST',
       body: JSON.stringify({ site_id: siteId, date: '2026-01-01' }),
     });
     assert.equal(checked.status, 200);
+
+    const lateSite = await request('/sites', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Added later' }),
+    });
+    assert.equal(lateSite.status, 200);
+    const historical = await request('/checkins/calendar?from=2026-01-01&to=2026-01-31');
+    assert.equal(historical.body.days['2026-01-01'], 1);
+    assert.equal(historical.body.totals['2026-01-01'], 1);
+    assert.equal(historical.body.totals['2026-01-31'], 1);
+    const historicalToday = await request('/checkins/today?date=2026-01-01');
+    assert.equal(historicalToday.body.total, 1);
+    assert.equal(historicalToday.body.doneCount, 1);
+
     const archived = await request(`/sites/${siteId}`, {
       method: 'PUT',
       body: JSON.stringify({ archived: true }),
@@ -104,6 +119,7 @@ test('route validation prevents invalid data and database errors', async (t) => 
     assert.equal(rejected.status, 409);
     const calendar = await request('/checkins/calendar?from=2026-01-01&to=2026-01-31');
     assert.deepEqual(calendar.body.days, {});
+    assert.equal(calendar.body.totals['2026-01-01'], 0);
   });
 
   await t.test('limits oversized calendar ranges', async () => {

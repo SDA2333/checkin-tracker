@@ -1,6 +1,7 @@
 // 网站清单 CRUD
 import { Router } from 'express';
 import db from '../db.js';
+import { isoToday } from '../dates.js';
 
 const r = Router();
 const MAX_NAME = 200;
@@ -27,13 +28,15 @@ r.post('/', (req, res) => {
   if (frequency !== 'daily' && frequency !== 'weekly')
     return res.status(400).json({ error: 'frequency 必须为 daily 或 weekly' });
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM sites').get().m;
+  const activeFrom = isoToday();
   const info = db
-    .prepare(`INSERT INTO sites (name, url, category, frequency, sort_order) VALUES (?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO sites (name, url, category, frequency, active_from, sort_order) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(
       String(name).trim(),
       String(url).trim(),
       String(category).trim(),
       frequency,
+      activeFrom,
       maxOrder + 1
     );
   res.json(db.prepare('SELECT * FROM sites WHERE id = ?').get(info.lastInsertRowid));

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS sites (
   url         TEXT    NOT NULL DEFAULT '',
   category    TEXT    NOT NULL DEFAULT '',
   frequency   TEXT    NOT NULL DEFAULT 'daily',   -- daily | weekly
+  active_from TEXT    NOT NULL DEFAULT '',        -- 从哪一天开始计入签到总数
   sort_order  INTEGER NOT NULL DEFAULT 0,
   archived    INTEGER NOT NULL DEFAULT 0,          -- 1 = 已归档/暂停
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -102,6 +103,16 @@ function ensureColumn(table, column, definition) {
 ensureColumn('renewals', 'current_period_start', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewals', 'current_period_end', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewals', 'renewal_policy', "TEXT NOT NULL DEFAULT 'extend_from_due'");
+ensureColumn('sites', 'active_from', "TEXT NOT NULL DEFAULT ''");
+
+db.prepare(
+  `UPDATE sites
+   SET active_from = COALESCE(
+     (SELECT MIN(checkins.date) FROM checkins WHERE checkins.site_id = sites.id),
+     substr(created_at, 1, 10)
+   )
+   WHERE active_from = '' OR active_from IS NULL`
+).run();
 
 ensureColumn('renewal_history', 'paid_on', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewal_history', 'effective_on', "TEXT NOT NULL DEFAULT ''");
