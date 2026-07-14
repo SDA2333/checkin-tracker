@@ -190,8 +190,6 @@ r.put('/:id', (req, res) => {
 r.post('/:id/renew', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
-  const cur = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
-  if (!cur) return res.status(404).json({ error: '不存在' });
   const body = req.body || {};
   const paidDate = String(body.paid_on || body.date || '');
   if ((body.paid_on !== undefined || body.date !== undefined) && !isValidDate(paidDate))
@@ -199,46 +197,56 @@ r.post('/:id/renew', (req, res) => {
   const paidOn = isValidDate(paidDate) ? paidDate : isoToday();
   if (body.policy !== undefined && !POLICIES.has(String(body.policy)))
     return res.status(400).json({ error: '续期策略不支持' });
-  const policy = normalizePolicy(String(body.policy || cur.renewal_policy), normalizePolicy(cur.renewal_policy));
-  const previousStart = periodStart(cur);
-  const previousEnd = periodEnd(cur);
-  let effectiveOn;
-
-  if (policy === 'manual_effective_date') {
-    const manualDate = String(body.effective_on || '');
-    if (!isValidDate(manualDate)) return res.status(400).json({ error: '请选择生效日期（YYYY-MM-DD）' });
-    effectiveOn = manualDate;
-  } else if (policy === 'reset_from_payment') {
-    effectiveOn = paidOn;
-  } else {
-    effectiveOn = daysBetween(paidOn, previousEnd) >= 0 ? previousEnd : paidOn;
-  }
-
-  const newEnd = addDays(effectiveOn, cur.cycle_days);
-  const historyNote =
-    policy === 'extend_from_due' && effectiveOn === previousEnd
-      ? '按原到期日顺延'
-      : policy === 'reset_from_payment'
-        ? '按付款日重算'
-        : policy === 'manual_effective_date'
-          ? '手动选择生效日'
-          : '';
+  const expectedPeriodEnd = String(body.expected_period_end || '');
+  if (!isValidDate(expectedPeriodEnd))
+    return res.status(400).json({ error: '续期状态已过期，请刷新后重试' });
+  if (body.policy === 'manual_effective_date' && !isValidDate(String(body.effective_on || '')))
+    return res.status(400).json({ error: '请选择生效日期（YYYY-MM-DD）' });
 
   const applyRenewal = db.transaction(() => {
-    db.prepare(
+    const current = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+    if (!current) return { missing: true };
+    const previousStart = periodStart(current);
+    const previousEnd = periodEnd(current);
+    if (previousEnd !== expectedPeriodEnd) return { conflict: true };
+
+    const policy = normalizePolicy(String(body.policy || current.renewal_policy), normalizePolicy(current.renewal_policy));
+    if (policy === 'manual_effective_date' && !isValidDate(String(body.effective_on || '')))
+      return { invalidEffectiveDate: true };
+    const effectiveOn = policy === 'manual_effective_date'
+      ? String(body.effective_on)
+      : policy === 'reset_from_payment'
+        ? paidOn
+        : daysBetween(paidOn, previousEnd) >= 0 ? previousEnd : paidOn;
+    const newEnd = addDays(effectiveOn, current.cycle_days);
+    const historyNote =
+      policy === 'extend_from_due' && effectiveOn === previousEnd
+        ? '按原到期日顺延'
+        : policy === 'reset_from_payment'
+          ? '按付款日重算'
+          : policy === 'manual_effective_date'
+            ? '手动选择生效日'
+            : '';
+
+    const updated = db.prepare(
       `UPDATE renewals
        SET last_renewed = ?, current_period_start = ?, current_period_end = ?, renewal_policy = ?
-       WHERE id = ?`
-    ).run(effectiveOn, effectiveOn, newEnd, policy, id);
+       WHERE id = ? AND current_period_end = ?`
+    ).run(effectiveOn, effectiveOn, newEnd, policy, id, expectedPeriodEnd);
+    if (updated.changes !== 1) return { conflict: true };
     db.prepare(
       `INSERT INTO renewal_history
        (renewal_id, renewed_on, paid_on, effective_on, previous_period_start, previous_period_end,
         new_period_start, new_period_end, policy_used, note)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, paidOn, paidOn, effectiveOn, previousStart, previousEnd, effectiveOn, newEnd, policy, historyNote);
-    return db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+    return { row: db.prepare('SELECT * FROM renewals WHERE id = ?').get(id) };
   });
-  res.json(decorate(applyRenewal(), paidOn));
+  const result = applyRenewal();
+  if (result.missing) return res.status(404).json({ error: '不存在' });
+  if (result.conflict) return res.status(409).json({ error: '续期状态已变化，请刷新后重试' });
+  if (result.invalidEffectiveDate) return res.status(400).json({ error: '请选择生效日期（YYYY-MM-DD）' });
+  res.json(decorate(result.row, paidOn));
 });
 
 // 续期历史

@@ -177,10 +177,12 @@ const promptDateModal = (title, value) =>
 const state = {
   date: localToday(),
   calMonth: monthStart(localToday()),
+  activeTab: 'today',
   sites: [], renewals: [],
   editSite: null, editRenew: null,
   showSiteForm: false, showRenewForm: false,
 };
+const pendingRenewals = new Set();
 
 /* ---------- 今日签到 ---------- */
 async function loadToday() {
@@ -544,14 +546,31 @@ async function promptEffectiveDateFor(id) {
 }
 
 async function renewItem(id, policy, effectiveOn) {
-  const body = { paid_on: localToday(), policy };
-  if (effectiveOn) body.effective_on = effectiveOn;
-  const rn = await api(`/api/renewals/${id}/renew`, { method: 'POST', body: JSON.stringify(body) });
-  const end = rn.current_period_end || rn.next_due;
-  if (policy === 'reset_from_payment') toastOk(`已按今天重算，下次到期 ${end}`);
-  else if (policy === 'manual_effective_date') toastOk(`已更新，下次到期 ${end}`);
-  else toastOk(`已顺延，下次到期 ${end}`);
-  loadRenewals();
+  if (pendingRenewals.has(id)) {
+    toast('该项目正在续期，请稍候', 'info');
+    return;
+  }
+  const current = state.renewals.find((item) => item.id === id);
+  const expectedPeriodEnd = current && (current.current_period_end || current.next_due);
+  if (!expectedPeriodEnd) throw new Error('续期状态已过期，请刷新后重试');
+
+  pendingRenewals.add(id);
+  const buttons = [...document.querySelectorAll(`#view-renew [data-id="${id}"]`)]
+    .filter((button) => button.matches('button'));
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const body = { paid_on: localToday(), policy, expected_period_end: expectedPeriodEnd };
+    if (effectiveOn) body.effective_on = effectiveOn;
+    const rn = await api(`/api/renewals/${id}/renew`, { method: 'POST', body: JSON.stringify(body) });
+    const end = rn.current_period_end || rn.next_due;
+    if (policy === 'reset_from_payment') toastOk(`已按今天重算，下次到期 ${end}`);
+    else if (policy === 'manual_effective_date') toastOk(`已更新，下次到期 ${end}`);
+    else toastOk(`已顺延，下次到期 ${end}`);
+    await loadRenewals();
+  } finally {
+    pendingRenewals.delete(id);
+    buttons.forEach((button) => { if (button.isConnected) button.disabled = false; });
+  }
 }
 
 /* ---------- 管理 ---------- */
@@ -789,6 +808,8 @@ async function checkNow() {
 /* ---------- 导航 ---------- */
 const views = { today: loadToday, calendar: loadCalendar, renew: loadRenewals, manage: loadManage, settings: loadSettings };
 function switchTab(tab) {
+  closeContextMenu();
+  state.activeTab = tab;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
   document.getElementById('view-' + tab).classList.remove('hidden');
@@ -1150,6 +1171,296 @@ document.getElementById('view-settings').addEventListener('click', async (e) => 
       if (row) row.remove();
       break;
     }
+  }
+});
+
+/* ---------- 全局右键菜单 ---------- */
+const contextMenu = document.createElement('div');
+contextMenu.id = 'context-menu';
+contextMenu.className = 'context-menu';
+contextMenu.setAttribute('role', 'menu');
+contextMenu.setAttribute('aria-label', '快捷操作');
+contextMenu.hidden = true;
+document.body.appendChild(contextMenu);
+
+let contextTarget = null;
+let contextInvoker = null;
+
+function closeContextMenu({ restoreFocus = false } = {}) {
+  if (contextMenu.hidden) return;
+  contextMenu.hidden = true;
+  contextMenu.innerHTML = '';
+  contextTarget = null;
+  if (restoreFocus && contextInvoker?.isConnected) contextInvoker.focus();
+  contextInvoker = null;
+}
+
+function contextItem(label, action, options = {}) {
+  return { label, action, ...options };
+}
+
+function editableContextItems(input) {
+  const start = Number.isInteger(input.selectionStart) ? input.selectionStart : 0;
+  const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : input.value.length;
+  const hasSelection = end > start;
+  return [
+    contextItem('复制', 'input-copy', { disabled: !hasSelection }),
+    contextItem('剪切', 'input-cut', { disabled: input.readOnly || input.disabled || !hasSelection }),
+    contextItem('粘贴', 'input-paste', { disabled: input.readOnly || input.disabled || !navigator.clipboard?.readText }),
+    contextItem('全选', 'input-select-all', { separatorBefore: true, disabled: !input.value }),
+  ];
+}
+
+function blankContextItems() {
+  const currentView = document.getElementById(`view-${state.activeTab}`);
+  const groups = [...currentView.querySelectorAll('.group')];
+  const hasCollapsed = groups.some((group) => group.classList.contains('collapsed'));
+  return [
+    contextItem('刷新当前页面', 'refresh'),
+    contextItem('添加网站', 'add-site', { separatorBefore: true }),
+    contextItem('添加续期项目', 'add-renewal'),
+    contextItem('回到今天', 'go-today', { separatorBefore: true }),
+    ...(groups.length ? [contextItem(hasCollapsed ? '展开全部分组' : '收起全部分组', hasCollapsed ? 'expand-groups' : 'collapse-groups')] : []),
+    contextItem(currentThemeIsDark() ? '切换到浅色主题' : '切换到深色主题', 'toggle-theme', { separatorBefore: true }),
+  ];
+}
+
+function describeContextTarget(target) {
+  const input = target.closest('input, textarea');
+  if (input) return { kind: 'input', element: input, items: editableContextItems(input) };
+
+  const renewal = target.closest('.renew-card[data-id]');
+  if (renewal) {
+    const id = Number(renewal.dataset.id);
+    const link = renewal.querySelector('a[href]');
+    const pending = pendingRenewals.has(id);
+    return {
+      kind: 'renewal', id, element: renewal,
+      items: [
+        ...(link ? [contextItem('打开续期链接', 'open-link')] : []),
+        contextItem(pending ? '续期处理中…' : '按现有策略续期', 'renew-default', { disabled: pending }),
+        contextItem('按今天重算', 'renew-today', { disabled: pending }),
+        contextItem('选择生效日期', 'renew-manual', { disabled: pending }),
+        contextItem('编辑续期项目', 'renew-edit', { separatorBefore: true, disabled: pending }),
+        contextItem('删除续期项目', 'renew-delete', { danger: true, disabled: pending }),
+      ],
+    };
+  }
+
+  const site = target.closest('.checkitem[data-id], .manage-item[data-id]');
+  if (site) {
+    const id = Number(site.dataset.id);
+    const data = state.sites.find((item) => item.id === id);
+    const link = site.querySelector('a[href]');
+    const isCheckitem = site.classList.contains('checkitem');
+    return {
+      kind: 'site', id, element: site,
+      items: [
+        ...(link ? [contextItem('打开签到链接', 'open-link')] : []),
+        ...(isCheckitem ? [contextItem(site.dataset.done === '1' ? '取消签到' : '标记为已签到', 'toggle-checkin')] : []),
+        contextItem('编辑网站', 'site-edit', { separatorBefore: true }),
+        contextItem(data?.archived ? '恢复网站' : '归档网站', 'site-archive'),
+        contextItem('删除网站', 'site-delete', { danger: true }),
+      ],
+    };
+  }
+
+  const calendarCell = target.closest('.cell[data-date]');
+  if (calendarCell) {
+    const future = calendarCell.dataset.date > localToday();
+    return {
+      kind: 'calendar', element: calendarCell, date: calendarCell.dataset.date,
+      items: [
+        contextItem('查看 / 补签当天', 'calendar-open', { disabled: future }),
+        contextItem('回到今天', 'go-today', { separatorBefore: true }),
+      ],
+    };
+  }
+
+  return { kind: 'blank', element: target, items: blankContextItems() };
+}
+
+function positionContextMenu(x, y) {
+  const gap = 8;
+  contextMenu.style.left = '0px';
+  contextMenu.style.top = '0px';
+  const rect = contextMenu.getBoundingClientRect();
+  const left = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap));
+  const top = Math.max(gap, Math.min(y, window.innerHeight - rect.height - gap));
+  contextMenu.style.left = `${left}px`;
+  contextMenu.style.top = `${top}px`;
+}
+
+function openContextMenu(target, x, y, { focusFirst = false } = {}) {
+  closeContextMenu();
+  contextTarget = describeContextTarget(target);
+  contextInvoker = target instanceof HTMLElement ? target : document.activeElement;
+  contextMenu.innerHTML = contextTarget.items.map((item) => `
+    ${item.separatorBefore ? '<div class="context-separator" role="separator"></div>' : ''}
+    <button type="button" role="menuitem" data-context-action="${item.action}"
+      class="${item.danger ? 'danger' : ''}" ${item.disabled ? 'disabled' : ''}>${esc(item.label)}</button>
+  `).join('');
+  contextMenu.classList.add('positioning');
+  contextMenu.hidden = false;
+  positionContextMenu(x, y);
+  contextMenu.classList.remove('positioning');
+  if (focusFirst) contextMenu.querySelector('button:not(:disabled)')?.focus();
+}
+
+async function getSiteForContext(id) {
+  state.sites = await api('/api/sites?archived=1');
+  return state.sites.find((item) => item.id === id) || null;
+}
+
+async function refreshContextView() {
+  await views[state.activeTab]();
+}
+
+async function runSiteContextAction(action, target) {
+  const site = await getSiteForContext(target.id);
+  if (!site) throw new Error('网站不存在或已被删除');
+  if (action === 'site-edit') {
+    state.editSite = site;
+    state.showSiteForm = true;
+    switchTab('manage');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  if (action === 'site-archive') {
+    await api(`/api/sites/${site.id}`, { method: 'PUT', body: JSON.stringify({ archived: site.archived ? 0 : 1 }) });
+    toastOk(site.archived ? '已恢复' : '已归档');
+    await refreshContextView();
+    return;
+  }
+  if (action === 'site-delete') {
+    const ok = await confirmModal('删除网站', `删除「${site.name}」后，它的所有打卡记录也会一并删除，且不可撤销。确定吗？`, { danger: true, confirmText: '删除' });
+    if (!ok) return;
+    await api(`/api/sites/${site.id}`, { method: 'DELETE' });
+    toastOk('已删除');
+    await refreshContextView();
+  }
+}
+
+async function runInputContextAction(action, input) {
+  input.focus();
+  const supportsSelection = Number.isInteger(input.selectionStart) && Number.isInteger(input.selectionEnd);
+  const start = supportsSelection ? input.selectionStart : 0;
+  const end = supportsSelection ? input.selectionEnd : input.value.length;
+  const selected = input.value.slice(start, end);
+  if (action === 'input-select-all') return input.select();
+  if (action === 'input-copy' || action === 'input-cut') {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(selected);
+    } else {
+      const helper = document.createElement('textarea');
+      helper.value = selected;
+      helper.style.position = 'fixed';
+      helper.style.opacity = '0';
+      document.body.appendChild(helper);
+      helper.select();
+      const copied = document.execCommand('copy');
+      helper.remove();
+      input.focus();
+      if (!copied) throw new Error('浏览器未允许访问剪贴板');
+    }
+    if (action === 'input-cut') {
+      if (supportsSelection) input.setRangeText('', start, end, 'start');
+      else input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return;
+  }
+  if (action === 'input-paste') {
+    const text = await navigator.clipboard.readText();
+    if (supportsSelection) input.setRangeText(text, start, end, 'end');
+    else input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+async function runContextAction(action) {
+  const target = contextTarget;
+  if (!target) return;
+  closeContextMenu();
+  try {
+    if (action.startsWith('input-')) return await runInputContextAction(action, target.element);
+    if (action === 'open-link') {
+      const href = target.element.querySelector('a[href]')?.href;
+      if (href) window.open(href, '_blank', 'noopener');
+      return;
+    }
+    if (action === 'toggle-checkin') return await toggleCheckin(target.element);
+    if (action.startsWith('site-')) return await runSiteContextAction(action, target);
+    if (action === 'renew-default') return await handleRenewAction('renew', target.id);
+    if (action === 'renew-today') return await handleRenewAction('renewToday', target.id);
+    if (action === 'renew-manual') return await handleRenewAction('renewManual', target.id);
+    if (action === 'renew-edit') return await handleRenewAction('edit', target.id);
+    if (action === 'renew-delete') return await handleRenewAction('del', target.id);
+    if (action === 'calendar-open') return openCalCell(target.element);
+    if (action === 'refresh') return await refreshContextView();
+    if (action === 'add-site') {
+      state.showSiteForm = true; state.editSite = null; switchTab('manage'); return;
+    }
+    if (action === 'add-renewal') {
+      state.showRenewForm = true; state.editRenew = null; switchTab('renew'); return;
+    }
+    if (action === 'go-today') {
+      state.date = localToday(); switchTab('today'); return;
+    }
+    if (action === 'toggle-theme') return themeToggle.click();
+    if (action === 'expand-groups' || action === 'collapse-groups') {
+      const collapse = action === 'collapse-groups';
+      document.querySelectorAll(`#view-${state.activeTab} .group`).forEach((group) => {
+        group.classList.toggle('collapsed', collapse);
+        group.querySelector('.group-header')?.setAttribute('aria-expanded', collapse ? 'false' : 'true');
+      });
+    }
+  } catch (err) {
+    toastErr(err.message || '操作失败');
+  }
+}
+
+document.addEventListener('contextmenu', (e) => {
+  if (e.shiftKey) return; // Shift + 右键保留浏览器原生菜单作为备用入口。
+  e.preventDefault();
+  openContextMenu(e.target, e.clientX, e.clientY);
+});
+
+contextMenu.addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-context-action]');
+  if (button && !button.disabled) runContextAction(button.dataset.contextAction);
+});
+
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('#context-menu')) closeContextMenu();
+});
+window.addEventListener('resize', () => closeContextMenu());
+window.addEventListener('blur', () => closeContextMenu());
+document.addEventListener('scroll', () => closeContextMenu(), true);
+
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && contextMenu.hidden) {
+    e.preventDefault();
+    const target = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+    const rect = target.getBoundingClientRect();
+    openContextMenu(target, rect.left + Math.min(rect.width, 24), rect.top + Math.min(rect.height, 24), { focusFirst: true });
+    return;
+  }
+  if (contextMenu.hidden) return;
+  if (e.key === 'Escape') {
+    e.preventDefault(); closeContextMenu({ restoreFocus: true }); return;
+  }
+  const buttons = [...contextMenu.querySelectorAll('button:not(:disabled)')];
+  const index = buttons.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const offset = e.key === 'ArrowDown' ? 1 : -1;
+    const next = index < 0 ? (offset > 0 ? 0 : buttons.length - 1) : (index + offset + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  } else if (e.key === 'Home') {
+    e.preventDefault(); buttons[0]?.focus();
+  } else if (e.key === 'End') {
+    e.preventDefault(); buttons[buttons.length - 1]?.focus();
   }
 });
 

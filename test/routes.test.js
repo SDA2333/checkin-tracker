@@ -175,6 +175,29 @@ test('route validation prevents invalid data and database errors', async (t) => 
       body: JSON.stringify({ paid_on: '2026-02-30' }),
     });
     assert.equal(invalidPayment.status, 400);
+
+    const expectedPeriodEnd = created.body.current_period_end;
+    const renewed = await request(`/renewals/${created.body.id}/renew`, {
+      method: 'POST',
+      body: JSON.stringify({
+        paid_on: '2026-01-15',
+        policy: 'extend_from_due',
+        expected_period_end: expectedPeriodEnd,
+      }),
+    });
+    assert.equal(renewed.status, 200);
+
+    const duplicate = await request(`/renewals/${created.body.id}/renew`, {
+      method: 'POST',
+      body: JSON.stringify({
+        paid_on: '2026-01-15',
+        policy: 'extend_from_due',
+        expected_period_end: expectedPeriodEnd,
+      }),
+    });
+    assert.equal(duplicate.status, 409);
+    const history = await request(`/renewals/${created.body.id}/history`);
+    assert.equal(history.body.length, 2);
   });
 });
 
