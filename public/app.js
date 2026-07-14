@@ -851,6 +851,28 @@ function toggleGroup(header) {
   header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
+// 根据当前卡片状态同步顶部计数和进度条，供乐观更新与回滚复用。
+function syncTodayProgress() {
+  const items = todayView.querySelectorAll('.checkitem');
+  const doneCount = todayView.querySelectorAll('.checkitem[data-done="1"]').length;
+  const total = items.length;
+  const count = todayView.querySelector('.progress .row b');
+  const bar = todayView.querySelector('.progress .bar > i');
+  if (count) count.textContent = `${doneCount}/${total}`;
+  if (bar) bar.style.width = `${total ? Math.round((doneCount / total) * 100) : 0}%`;
+}
+
+function setCheckitemDone(item, done) {
+  item.classList.toggle('done', done);
+  item.dataset.done = done ? '1' : '0';
+  item.setAttribute('aria-pressed', done ? 'true' : 'false');
+  const label = item.getAttribute('aria-label') || '';
+  item.setAttribute('aria-label', label.replace(done ? '，未签到' : '，已签到', done ? '，已签到' : '，未签到'));
+  const tick = item.querySelector('.checkbox .tick');
+  if (tick) tick.textContent = done ? '✓' : '';
+  syncTodayProgress();
+}
+
 // 打卡切换（供点击与键盘复用）
 async function toggleCheckin(item) {
   const id = Number(item.dataset.id);
@@ -887,20 +909,13 @@ todayView.addEventListener('click', async (e) => {
     const id = Number(t.dataset.id);
     const item = t.closest('.checkitem');
     if (item && item.dataset.done === '0') {
-      item.classList.add('done');
-      item.dataset.done = '1';
-      item.setAttribute('aria-pressed', 'true');
-      const tick = item.querySelector('.checkbox .tick');
-      if (tick) tick.textContent = '✓';
+      setCheckitemDone(item, true);
       api('/api/checkins', {
         method: 'POST',
         body: JSON.stringify({ site_id: id, date: state.date }),
       }).catch(() => {
         // 失败回滚，让用户知道没签上
-        item.classList.remove('done');
-        item.dataset.done = '0';
-        item.setAttribute('aria-pressed', 'false');
-        if (tick) tick.textContent = '';
+        setCheckitemDone(item, false);
         toastErr('签到未成功，请重试');
       });
     }
