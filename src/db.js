@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- 用户上传的背景图片。文件本体保存在 data/backgrounds/，这里仅保存安全生成的文件名和展示信息。
+CREATE TABLE IF NOT EXISTS backgrounds (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  display_name TEXT    NOT NULL,
+  filename     TEXT    NOT NULL UNIQUE,
+  mime_type    TEXT    NOT NULL,
+  size_bytes   INTEGER NOT NULL,
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 推送历史记录
 CREATE TABLE IF NOT EXISTS notification_logs (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

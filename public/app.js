@@ -826,13 +826,166 @@ document.getElementById('logout').addEventListener('click', async () => {
   location.href = '/login.html';
 });
 
-// 背景切换
+// 背景图库（选择结果保存在服务端，所有设备同步）
 const bgToggle = document.getElementById('bgToggle');
-const bgEnabled = localStorage.getItem('bgEnabled') === '1';
-if (bgEnabled) document.body.classList.add('with-bg');
-bgToggle.addEventListener('click', () => {
-  document.body.classList.toggle('with-bg');
-  localStorage.setItem('bgEnabled', document.body.classList.contains('with-bg') ? '1' : '0');
+let backgroundConfig = null;
+
+function applyBackground(config) {
+  const selected = config?.selected || 'default';
+  const item = config?.items?.find((candidate) => candidate.id === selected);
+  if (selected === 'none' || !item?.url) {
+    document.body.classList.remove('with-bg');
+    document.body.style.removeProperty('--app-background-image');
+  } else {
+    document.body.style.setProperty('--app-background-image', `url("${item.url.replace(/["\\]/g, '\\$&')}")`);
+    document.body.classList.add('with-bg');
+  }
+  bgToggle.classList.toggle('active', selected !== 'none');
+  bgToggle.title = selected === 'none' ? '选择背景（当前无背景）' : `选择背景（${item?.name || '默认背景'}）`;
+}
+
+async function loadBackgroundConfig({ notify = false } = {}) {
+  try {
+    backgroundConfig = await api('/api/backgrounds');
+    applyBackground(backgroundConfig);
+    return backgroundConfig;
+  } catch (err) {
+    if (notify) toastErr('背景加载失败: ' + err.message);
+    throw err;
+  }
+}
+
+function renderBackgroundGallery(overlay, config) {
+  const gallery = overlay.querySelector('.background-gallery');
+  gallery.innerHTML = config.items.map((item) => `
+    <div class="background-option ${item.id === config.selected ? 'selected' : ''}" data-background-id="${esc(item.id)}">
+      ${item.builtIn ? '' : `<button class="background-delete" type="button" data-delete-background="${esc(item.id)}" aria-label="删除 ${esc(item.name)}" title="删除">×</button>`}
+      <button class="background-select" type="button" data-select-background="${esc(item.id)}" aria-pressed="${item.id === config.selected ? 'true' : 'false'}" aria-label="使用 ${esc(item.name)}">
+        <span class="background-preview ${item.id === 'none' ? 'none' : ''}">
+          ${item.url ? `<img src="${esc(item.url)}" alt="" loading="lazy">` : '<span aria-hidden="true">⊘</span>'}
+        </span>
+        <span class="background-option-info">
+          <span class="background-option-name">${esc(item.name)}</span>
+          ${item.id === config.selected ? '<span class="background-selected-mark" aria-label="当前背景">✓</span>' : ''}
+        </span>
+      </button>
+    </div>`).join('');
+  const uploadedCount = config.items.length - 2;
+  overlay.querySelector('.background-count').textContent = `${uploadedCount}/${config.limits.maxUploads}`;
+  const upload = overlay.querySelector('[data-background-upload]');
+  upload.disabled = uploadedCount >= config.limits.maxUploads;
+  upload.title = upload.disabled ? '已达到上传数量上限，请先删除旧图片' : '';
+}
+
+async function selectBackground(id, overlay) {
+  await api('/api/backgrounds/selection', { method: 'PUT', body: JSON.stringify({ id }) });
+  backgroundConfig.selected = id;
+  applyBackground(backgroundConfig);
+  renderBackgroundGallery(overlay, backgroundConfig);
+  toastOk(id === 'none' ? '已关闭背景' : '背景已切换并同步');
+}
+
+async function uploadBackground(file, overlay) {
+  if (!file) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('仅支持 JPG、PNG 或 WebP 图片');
+  if (file.size > backgroundConfig.limits.maxBytes) throw new Error('图片不能超过 10MB');
+  overlay.querySelector('.background-modal').classList.add('background-uploading');
+  try {
+    await api('/api/backgrounds', {
+      method: 'POST',
+      headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) },
+      body: file,
+    });
+    backgroundConfig = await api('/api/backgrounds');
+    applyBackground(backgroundConfig);
+    renderBackgroundGallery(overlay, backgroundConfig);
+    toastOk('背景已上传并启用');
+  } finally {
+    overlay.querySelector('.background-modal')?.classList.remove('background-uploading');
+  }
+}
+
+async function deleteBackground(id, overlay) {
+  const item = backgroundConfig.items.find((candidate) => candidate.id === id);
+  if (!item || item.builtIn) return;
+  const ok = await confirmModal('删除背景', `确定删除「${item.name}」吗？此操作不可撤销。`, { danger: true, confirmText: '删除' });
+  if (!ok) return openBackgroundPicker();
+  try {
+    await api(`/api/backgrounds/${id.slice(7)}`, { method: 'DELETE' });
+    backgroundConfig = await api('/api/backgrounds');
+    applyBackground(backgroundConfig);
+    toastOk('背景已删除');
+  } finally {
+    await openBackgroundPicker();
+  }
+}
+
+async function openBackgroundPicker() {
+  try {
+    await loadBackgroundConfig();
+  } catch (err) {
+    toastErr('背景加载失败: ' + err.message);
+    return;
+  }
+  const root = document.getElementById('modal-root');
+  if (activeModalCleanup) { activeModalCleanup(); activeModalCleanup = null; }
+  const prevFocus = document.activeElement;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal background-modal" role="dialog" aria-modal="true" aria-labelledby="background-title">
+      <div class="background-modal-head">
+        <div><h3 id="background-title">选择背景</h3><div class="muted">选择结果会同步到所有设备</div></div>
+        <button class="background-close" type="button" data-background-close aria-label="关闭">×</button>
+      </div>
+      <div class="background-gallery"></div>
+      <div class="background-modal-actions">
+        <span class="background-upload-note">已上传 <span class="background-count"></span> · JPG/PNG/WebP · 最大 10MB</span>
+        <button class="btn" type="button" data-background-upload>＋ 上传新背景</button>
+        <input type="file" accept="image/jpeg,image/png,image/webp" data-background-file hidden>
+      </div>
+    </div>`;
+  root.innerHTML = '';
+  root.appendChild(overlay);
+  renderBackgroundGallery(overlay, backgroundConfig);
+
+  const close = () => { closeModal(); setTimeout(() => prevFocus?.focus?.(), 170); };
+  const onClick = async (event) => {
+    try {
+      const select = event.target.closest('[data-select-background]');
+      const remove = event.target.closest('[data-delete-background]');
+      if (remove) return await deleteBackground(remove.dataset.deleteBackground, overlay);
+      if (select) return await selectBackground(select.dataset.selectBackground, overlay);
+      if (event.target.closest('[data-background-upload]')) return overlay.querySelector('[data-background-file]').click();
+      if (event.target.closest('[data-background-close]') || event.target === overlay) close();
+    } catch (err) { toastErr(err.message || '背景操作失败'); }
+  };
+  const onChange = async (event) => {
+    if (!event.target.matches('[data-background-file]')) return;
+    try { await uploadBackground(event.target.files[0], overlay); }
+    catch (err) { toastErr(err.message || '上传失败'); }
+    finally { event.target.value = ''; }
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = [...overlay.querySelectorAll('button:not(:disabled), input:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+  overlay.addEventListener('click', onClick);
+  overlay.addEventListener('change', onChange);
+  document.addEventListener('keydown', onKey);
+  activeModalCleanup = () => document.removeEventListener('keydown', onKey);
+  setTimeout(() => overlay.querySelector('[data-background-close]')?.focus(), 40);
+}
+
+bgToggle.addEventListener('click', openBackgroundPicker);
+loadBackgroundConfig().catch(() => { /* 保留内置默认背景，稍后打开选择器时重试 */ });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') loadBackgroundConfig().catch(() => {});
 });
 
 // 主题切换（深色 / 浅色 / 跟随系统）
@@ -1199,6 +1352,19 @@ function contextItem(label, action, options = {}) {
   return { label, action, ...options };
 }
 
+const contextIcons = {
+  'input-copy': '⧉', 'input-cut': '✂', 'input-paste': '▣', 'input-select-all': '⌗',
+  'open-link': '↗', 'toggle-checkin': '✓',
+  'site-edit': '✎', 'site-archive': '◇', 'site-delete': '×',
+  'renew-default': '↻', 'renew-today': '◷', 'renew-manual': '▣', 'renew-edit': '✎', 'renew-delete': '×',
+  'calendar-open': '◫', refresh: '↻', 'add-site': '+', 'add-renewal': '+', 'go-today': '●',
+  'expand-groups': '⌄', 'collapse-groups': '⌃', 'toggle-theme': '◐',
+};
+
+function contextTargetTitle(element, fallback) {
+  return (element.querySelector('.name')?.textContent || fallback).replace(/\s*↗\s*$/, '').trim();
+}
+
 function editableContextItems(input) {
   const start = Number.isInteger(input.selectionStart) ? input.selectionStart : 0;
   const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : input.value.length;
@@ -1227,7 +1393,7 @@ function blankContextItems() {
 
 function describeContextTarget(target) {
   const input = target.closest('input, textarea');
-  if (input) return { kind: 'input', element: input, items: editableContextItems(input) };
+  if (input) return { kind: 'input', title: '文本操作', badge: '✎', element: input, items: editableContextItems(input) };
 
   const renewal = target.closest('.renew-card[data-id]');
   if (renewal) {
@@ -1235,7 +1401,7 @@ function describeContextTarget(target) {
     const link = renewal.querySelector('a[href]');
     const pending = pendingRenewals.has(id);
     return {
-      kind: 'renewal', id, element: renewal,
+      kind: 'renewal', title: contextTargetTitle(renewal, '续期项目'), badge: '↻', id, element: renewal,
       items: [
         ...(link ? [contextItem('打开续期链接', 'open-link')] : []),
         contextItem(pending ? '续期处理中…' : '按现有策略续期', 'renew-default', { disabled: pending }),
@@ -1254,7 +1420,7 @@ function describeContextTarget(target) {
     const link = site.querySelector('a[href]');
     const isCheckitem = site.classList.contains('checkitem');
     return {
-      kind: 'site', id, element: site,
+      kind: 'site', title: contextTargetTitle(site, '签到网站'), badge: '✓', id, element: site,
       items: [
         ...(link ? [contextItem('打开签到链接', 'open-link')] : []),
         ...(isCheckitem ? [contextItem(site.dataset.done === '1' ? '取消签到' : '标记为已签到', 'toggle-checkin')] : []),
@@ -1269,7 +1435,7 @@ function describeContextTarget(target) {
   if (calendarCell) {
     const future = calendarCell.dataset.date > localToday();
     return {
-      kind: 'calendar', element: calendarCell, date: calendarCell.dataset.date,
+      kind: 'calendar', title: calendarCell.dataset.date, badge: '◫', element: calendarCell, date: calendarCell.dataset.date,
       items: [
         contextItem('查看 / 补签当天', 'calendar-open', { disabled: future }),
         contextItem('回到今天', 'go-today', { separatorBefore: true }),
@@ -1277,7 +1443,8 @@ function describeContextTarget(target) {
     };
   }
 
-  return { kind: 'blank', element: target, items: blankContextItems() };
+  const viewNames = { today: '今日', calendar: '日历', renew: '续期', manage: '管理', settings: '设置' };
+  return { kind: 'blank', title: `${viewNames[state.activeTab] || '页面'}快捷操作`, badge: '⌘', element: target, items: blankContextItems() };
 }
 
 function positionContextMenu(x, y) {
@@ -1295,11 +1462,22 @@ function openContextMenu(target, x, y, { focusFirst = false } = {}) {
   closeContextMenu();
   contextTarget = describeContextTarget(target);
   contextInvoker = target instanceof HTMLElement ? target : document.activeElement;
-  contextMenu.innerHTML = contextTarget.items.map((item) => `
-    ${item.separatorBefore ? '<div class="context-separator" role="separator"></div>' : ''}
-    <button type="button" role="menuitem" data-context-action="${item.action}"
-      class="${item.danger ? 'danger' : ''}" ${item.disabled ? 'disabled' : ''}>${esc(item.label)}</button>
-  `).join('');
+  contextMenu.setAttribute('aria-label', `${contextTarget.title}快捷操作`);
+  contextMenu.innerHTML = `
+    <div class="context-menu-head" aria-hidden="true">
+      <span class="context-menu-badge">${esc(contextTarget.badge)}</span>
+      <span class="context-menu-title">${esc(contextTarget.title)}</span>
+    </div>
+    <div class="context-menu-list">
+      ${contextTarget.items.map((item) => `
+        ${item.separatorBefore ? '<div class="context-separator" role="separator"></div>' : ''}
+        <button type="button" role="menuitem" data-context-action="${item.action}"
+          class="${item.danger ? 'danger' : ''}" ${item.disabled ? 'disabled' : ''}>
+          <span class="context-menu-icon" aria-hidden="true">${esc(contextIcons[item.action] || '·')}</span>
+          <span class="context-menu-label">${esc(item.label)}</span>
+        </button>
+      `).join('')}
+    </div>`;
   contextMenu.classList.add('positioning');
   contextMenu.hidden = false;
   positionContextMenu(x, y);

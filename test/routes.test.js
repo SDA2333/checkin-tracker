@@ -7,13 +7,15 @@ import express from 'express';
 
 const tempDir = mkdtempSync(join(tmpdir(), 'checkin-tracker-'));
 process.env.DB_PATH = join(tempDir, 'test.db');
+process.env.BACKGROUND_DIR = join(tempDir, 'backgrounds');
 
-const [{ default: db }, { default: sites }, { default: checkins }, { default: renewals }] =
+const [{ default: db }, { default: sites }, { default: checkins }, { default: renewals }, { default: backgrounds }] =
   await Promise.all([
     import('../src/db.js'),
     import('../src/routes/sites.js'),
     import('../src/routes/checkins.js'),
     import('../src/routes/renewals.js'),
+    import('../src/routes/backgrounds.js'),
   ]);
 
 const app = express();
@@ -21,6 +23,7 @@ app.use(express.json());
 app.use('/sites', sites);
 app.use('/checkins', checkins);
 app.use('/renewals', renewals);
+app.use('/backgrounds', backgrounds);
 
 const server = await new Promise((resolve) => {
   const value = app.listen(0, '127.0.0.1', () => resolve(value));
@@ -198,6 +201,69 @@ test('route validation prevents invalid data and database errors', async (t) => 
     assert.equal(duplicate.status, 409);
     const history = await request(`/renewals/${created.body.id}/history`);
     assert.equal(history.body.length, 2);
+  });
+});
+
+test('background gallery validates uploads and keeps selection consistent', async (t) => {
+  await t.test('starts with the built-in background selected', async () => {
+    const result = await request('/backgrounds');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.selected, 'default');
+    assert.deepEqual(result.body.items.slice(0, 2).map((item) => item.id), ['none', 'default']);
+  });
+
+  await t.test('rejects unsupported and forged image bodies', async () => {
+    const unsupported = await request('/backgrounds', {
+      method: 'POST',
+      headers: { 'content-type': 'image/gif' },
+      body: Buffer.from('GIF89a'),
+    });
+    assert.equal(unsupported.status, 415);
+
+    const forged = await request('/backgrounds', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: Buffer.from('not a png'),
+    });
+    assert.equal(forged.status, 400);
+  });
+
+  let uploadedId;
+  await t.test('uploads and automatically selects a valid image', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    const result = await request('/backgrounds', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('测试背景.png') },
+      body: png,
+    });
+    assert.equal(result.status, 201);
+    uploadedId = result.body.selected;
+    assert.match(uploadedId, /^upload:\d+$/);
+    assert.equal(result.body.item.name, '测试背景');
+    assert.equal((await request('/backgrounds')).body.selected, uploadedId);
+  });
+
+  await t.test('serves the uploaded bytes and validates selection IDs', async () => {
+    const numericId = uploadedId.slice(7);
+    const image = await fetch(`${base}/backgrounds/${numericId}/image`);
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.equal((await image.arrayBuffer()).byteLength, 9);
+
+    const missing = await request('/backgrounds/selection', {
+      method: 'PUT',
+      body: JSON.stringify({ id: 'upload:999999' }),
+    });
+    assert.equal(missing.status, 404);
+  });
+
+  await t.test('deleting the selected upload falls back to the default', async () => {
+    const result = await request(`/backgrounds/${uploadedId.slice(7)}`, { method: 'DELETE' });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.selected, 'default');
+    const gallery = await request('/backgrounds');
+    assert.equal(gallery.body.selected, 'default');
+    assert.equal(gallery.body.items.length, 2);
   });
 });
 

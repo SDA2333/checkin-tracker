@@ -18,6 +18,7 @@ import sitesRouter from './src/routes/sites.js';
 import checkinsRouter from './src/routes/checkins.js';
 import renewalsRouter from './src/routes/renewals.js';
 import settingsRouter from './src/routes/settings.js';
+import backgroundsRouter from './src/routes/backgrounds.js';
 import { startScheduler } from './src/notifications/scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +104,7 @@ app.use('/api/sites', requireAuth, sitesRouter);
 app.use('/api/checkins', requireAuth, checkinsRouter);
 app.use('/api/renewals', requireAuth, renewalsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
+app.use('/api/backgrounds', requireAuth, backgroundsRouter);
 
 app.use('/api', requireAuth, (req, res) => res.status(404).json({ error: 'API 不存在' }));
 
