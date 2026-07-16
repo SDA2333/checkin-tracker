@@ -72,11 +72,9 @@
   min-height: 308px;
   margin: 30px auto 8px;
   padding: 22px;
-  border: 2px solid rgba(255, 250, 225, .65);
+  border: 2px solid var(--scene-shell-border);
   border-radius: 48px 38px 54px 42px / 42px 53px 38px 48px;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, .56) 0 2px, transparent 2.5px) 0 0 / 31px 31px,
-    linear-gradient(125deg, rgba(246, 241, 207, .78), rgba(205, 235, 205, .67));
+  background: var(--scene-shell-bg);
   box-shadow: 0 9px 0 rgba(76, 126, 91, .13), 0 26px 60px rgba(71, 106, 77, .18);
   backdrop-filter: blur(14px) saturate(1.05);
   isolation: isolate;
@@ -116,12 +114,10 @@
   position: relative;
   z-index: 2;
   padding: 25px 25px 24px;
-  border: 2px solid rgba(207, 188, 148, .65);
+  border: 2px solid var(--scene-paper-border);
   border-radius: 28px 36px 29px 40px / 33px 27px 41px 31px;
-  color: #6d5a41;
-  background:
-    radial-gradient(circle, rgba(156, 133, 92, .12) 1px, transparent 1.5px) 0 0/18px 18px,
-    linear-gradient(145deg, rgba(255, 252, 229, .97), rgba(247, 240, 205, .94));
+  color: var(--scene-paper-ink);
+  background: var(--scene-paper-bg);
   box-shadow: 0 6px 0 rgba(133, 105, 64, .13), 0 16px 30px rgba(87, 102, 72, .12);
 }
 
@@ -169,7 +165,7 @@
 .hero-copy > p {
   min-height: 40px;
   margin: 10px 0 16px;
-  color: #8d7c63;
+  color: var(--scene-paper-muted);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -188,10 +184,10 @@
   gap: 5px;
   min-height: 27px;
   padding: 3px 9px;
-  border: 1px solid rgba(117, 145, 100, .24);
+  border: 1px solid var(--scene-chip-border);
   border-radius: 999px;
-  color: #6d775e;
-  background: rgba(255, 255, 244, .62);
+  color: var(--scene-chip-ink);
+  background: var(--scene-chip-bg);
   font-size: 10px;
   font-weight: 750;
 }
@@ -226,10 +222,10 @@
   gap: 6px;
   min-height: 37px;
   padding: 0 14px;
-  border: 2px solid rgba(114, 142, 92, .36);
+  border: 2px solid var(--scene-action-border);
   border-radius: 999px;
-  color: #617557;
-  background: rgba(255, 253, 233, .82);
+  color: var(--scene-action-ink);
+  background: var(--scene-action-bg);
   box-shadow: 0 3px 0 rgba(103, 128, 84, .22);
   font: inherit;
   font-size: 11px;
@@ -239,7 +235,7 @@
 
 .hero-action:hover {
   transform: translateY(-2px) rotate(-.5deg);
-  background: #fffce9;
+  background: var(--scene-action-hover);
   box-shadow: 0 5px 0 rgba(103, 128, 84, .22);
 }
 
@@ -263,9 +259,9 @@
   position: relative;
   z-index: 1;
   min-width: 0;
-  border: 5px solid rgba(255, 248, 218, .88);
+  border: 5px solid var(--scene-world-border);
   border-radius: 40px 28px 46px 31px / 31px 44px 30px 42px;
-  background: #bfe9e0;
+  background: var(--scene-world-bg);
   box-shadow: 0 8px 0 rgba(71, 127, 91, .16), 0 22px 35px rgba(59, 111, 81, .16);
   overflow: hidden;
   transform-origin: center;
@@ -277,6 +273,8 @@
   width: 100%;
   height: auto;
   min-height: 230px;
+  filter: var(--scene-world-filter);
+  transition: filter .35s ease;
 }
 
 .world-label {
@@ -285,8 +283,8 @@
   bottom: 12px;
   padding: 5px 10px;
   border-radius: 999px;
-  color: rgba(95, 78, 51, .76);
-  background: rgba(255, 249, 218, .82);
+  color: var(--scene-label-ink);
+  background: var(--scene-label-bg);
   box-shadow: 0 2px 0 rgba(107, 90, 57, .13);
   font-size: 8px;
   font-weight: 900;
@@ -307,10 +305,10 @@
   height: 128px;
   min-height: 0;
   padding: 0;
-  border: 2px solid rgba(206, 185, 141, .64);
+  border: 2px solid var(--scene-progress-border);
   border-radius: 50%;
-  color: #6b604a;
-  background: rgba(255, 250, 224, .88);
+  color: var(--scene-paper-ink);
+  background: var(--scene-progress-bg);
   box-shadow: 0 6px 0 rgba(124, 103, 67, .13), 0 14px 26px rgba(68, 100, 70, .12);
 }
 
@@ -325,7 +323,7 @@
   stroke-width: 10;
 }
 
-.progress-track { stroke: rgba(117, 141, 92, .18); }
+.progress-track { stroke: var(--scene-progress-border); }
 .progress-value {
   stroke: #58b590;
   stroke-linecap: round;
@@ -342,17 +340,17 @@
 }
 
 .progress-center strong {
-  color: #4d8065;
+  color: var(--scene-progress-ink);
   font-size: 27px;
   line-height: 1;
   letter-spacing: -.06em;
 }
 
 .progress-center small { font-size: 12px; letter-spacing: 0; }
-.progress-center span { margin-top: 5px; color: #99886c; font-size: 9px; font-weight: 800; }
+.progress-center span { margin-top: 5px; color: var(--scene-progress-muted); font-size: 9px; font-weight: 800; }
 .progress-numbers { display: none; }
-.progress-numbers b { color: #5b9d7d; font-size: 22px; }
-.progress-numbers span { color: #a2947d; font-size: 12px; }
+.progress-numbers b { color: var(--scene-progress-ink); font-size: 22px; }
+.progress-numbers span { color: var(--scene-progress-muted); font-size: 12px; }
 
 .island-guide {
   position: fixed;
@@ -373,10 +371,10 @@
   gap: 8px;
   min-height: 43px;
   padding: 6px 14px 6px 9px;
-  border: 2px solid rgba(117, 102, 71, .35);
+  border: 2px solid var(--scene-guide-border);
   border-radius: 999px;
-  color: #6f634d;
-  background: rgba(255, 249, 220, .95);
+  color: var(--scene-guide-ink);
+  background: var(--scene-guide-bg);
   box-shadow: 0 4px 0 rgba(100, 84, 54, .18), 0 12px 25px rgba(57, 83, 62, .18);
   backdrop-filter: blur(10px);
   font: inherit;
@@ -561,7 +559,7 @@ main {
     right: 18px;
     width: 112px;
     height: 112px;
-    background: rgba(255, 250, 224, .94);
+    background: var(--scene-progress-bg);
   }
   .hero-progress-card svg { width: 92px; height: 92px; }
   .progress-center { top: 29px; }
