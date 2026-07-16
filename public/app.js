@@ -27,20 +27,44 @@ function hrefOf(u) {
 /* ---------- 岛屿音效（Web Audio 原创合成音，不加载外部音频） ---------- */
 const uiAudio = (() => {
   let context = null;
-  let enabled = localStorage.getItem('ui-sound') !== 'off';
+  let output = null;
+  let resumePromise = null;
+  let enabled = true;
+  try { enabled = localStorage.getItem('ui-sound') !== 'off'; } catch { /* storage may be unavailable */ }
 
-  function ensureContext() {
+  function getContext() {
     if (!enabled) return null;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return null;
-    if (!context) context = new AudioCtx();
-    if (context.state === 'suspended') context.resume().catch(() => {});
+    if (!context || context.state === 'closed') {
+      try {
+        context = new AudioCtx();
+        output = context.createGain();
+        output.gain.value = 2.6;
+        output.connect(context.destination);
+      } catch {
+        context = null;
+        output = null;
+      }
+    }
     return context;
   }
 
-  function note(frequency, delay = 0, duration = 0.07, volume = 0.025, type = 'sine', endFrequency = null) {
-    const ctx = ensureContext();
-    if (!ctx) return;
+  async function ensureContext() {
+    const ctx = getContext();
+    if (!ctx) return null;
+    if (ctx.state !== 'running') {
+      if (!resumePromise) {
+        resumePromise = Promise.resolve(ctx.resume())
+          .catch(() => null)
+          .finally(() => { resumePromise = null; });
+      }
+      await resumePromise;
+    }
+    return ctx.state === 'running' ? ctx : null;
+  }
+
+  function note(ctx, frequency, delay = 0, duration = 0.07, volume = 0.025, type = 'sine', endFrequency = null) {
     const start = ctx.currentTime + delay;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -51,35 +75,42 @@ const uiAudio = (() => {
     gain.gain.exponentialRampToValueAtTime(volume, start + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
     oscillator.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(output || ctx.destination);
     oscillator.start(start);
     oscillator.stop(start + duration + 0.02);
   }
 
-  function play(kind = 'tap') {
-    if (!enabled) return;
-    if (kind === 'navigate') {
-      note(440, 0, 0.065, 0.022, 'triangle', 560);
-      note(660, 0.045, 0.07, 0.018, 'sine', 720);
-    } else if (kind === 'success') {
-      note(523.25, 0, 0.09, 0.022, 'sine', 560);
-      note(659.25, 0.055, 0.1, 0.022, 'sine', 700);
-      note(783.99, 0.11, 0.13, 0.026, 'triangle', 820);
-    } else if (kind === 'error') {
-      note(260, 0, 0.1, 0.022, 'triangle', 190);
-      note(180, 0.065, 0.11, 0.018, 'sine', 150);
-    } else {
-      note(620, 0, 0.045, 0.014, 'triangle', 520);
+  async function play(kind = 'tap') {
+    if (!enabled) return false;
+    const ctx = await ensureContext();
+    if (!ctx) return false;
+    try {
+      if (kind === 'navigate') {
+        note(ctx, 440, 0, 0.065, 0.022, 'triangle', 560);
+        note(ctx, 660, 0.045, 0.07, 0.018, 'sine', 720);
+      } else if (kind === 'success') {
+        note(ctx, 523.25, 0, 0.09, 0.022, 'sine', 560);
+        note(ctx, 659.25, 0.055, 0.1, 0.022, 'sine', 700);
+        note(ctx, 783.99, 0.11, 0.13, 0.026, 'triangle', 820);
+      } else if (kind === 'error') {
+        note(ctx, 260, 0, 0.1, 0.022, 'triangle', 190);
+        note(ctx, 180, 0.065, 0.11, 0.018, 'sine', 150);
+      } else {
+        note(ctx, 620, 0, 0.055, 0.014, 'triangle', 520);
+      }
+    } catch {
+      return false;
     }
+    return true;
   }
 
   function setEnabled(value) {
     enabled = !!value;
-    localStorage.setItem('ui-sound', enabled ? 'on' : 'off');
-    if (enabled) play('success');
+    try { localStorage.setItem('ui-sound', enabled ? 'on' : 'off'); } catch { /* storage may be unavailable */ }
+    return enabled ? play('success') : Promise.resolve(false);
   }
 
-  return { play, setEnabled, isEnabled: () => enabled };
+  return { play, setEnabled, unlock: ensureContext, isEnabled: () => enabled };
 })();
 function policyLabel(policy) {
   return ({
@@ -928,10 +959,12 @@ document.getElementById('logout').addEventListener('click', async () => {
 });
 
 // 所有可交互控件共用轻触反馈；导航使用更明亮的双音。
+// pointerdown 先解锁音频，保证紧随其后的 click 能立即发声；键盘点击仍由 play() 自行解锁。
+document.addEventListener('pointerdown', () => { void uiAudio.unlock(); }, { capture: true, passive: true });
 document.addEventListener('click', (event) => {
   const control = event.target.closest('button, a[href], [role="button"]');
   if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.id === 'soundToggle') return;
-  uiAudio.play(control.matches('[data-tab]') ? 'navigate' : 'tap');
+  void uiAudio.play(control.matches('[data-tab]') ? 'navigate' : 'tap');
 }, true);
 
 // 背景图库（选择结果保存在服务端，所有设备同步）
@@ -1141,7 +1174,7 @@ function syncSoundIcon() {
   soundToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
 }
 soundToggle.addEventListener('click', () => {
-  uiAudio.setEnabled(!uiAudio.isEnabled());
+  void uiAudio.setEnabled(!uiAudio.isEnabled());
   syncSoundIcon();
 });
 syncSoundIcon();
