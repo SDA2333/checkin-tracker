@@ -29,9 +29,10 @@ r.post('/', (req, res) => {
     return res.status(400).json({ error: 'frequency 必须为 daily 或 weekly' });
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM sites').get().m;
   const activeFrom = isoToday();
-  const info = db
-    .prepare(`INSERT INTO sites (name, url, category, frequency, active_from, sort_order) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(
+  const create = db.transaction(() => {
+    const info = db
+      .prepare(`INSERT INTO sites (name, url, category, frequency, active_from, sort_order) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(
       String(name).trim(),
       String(url).trim(),
       String(category).trim(),
@@ -39,6 +40,11 @@ r.post('/', (req, res) => {
       activeFrom,
       maxOrder + 1
     );
+    db.prepare('INSERT INTO site_activity_periods (site_id, active_from) VALUES (?, ?)')
+      .run(info.lastInsertRowid, activeFrom);
+    return info;
+  });
+  const info = create();
   res.json(db.prepare('SELECT * FROM sites WHERE id = ?').get(info.lastInsertRowid));
 });
 
@@ -59,17 +65,47 @@ r.put('/:id', (req, res) => {
     return res.status(400).json({ error: 'archived 必须是布尔值' });
   const nextOrder = sort_order !== undefined ? Number(sort_order) : cur.sort_order;
   if (!Number.isSafeInteger(nextOrder)) return res.status(400).json({ error: '排序值无效' });
-  db.prepare(
-    `UPDATE sites SET name=?, url=?, category=?, frequency=?, archived=?, sort_order=? WHERE id=?`
-  ).run(
-    name !== undefined ? String(name).trim() : cur.name,
-    url !== undefined ? String(url).trim() : cur.url,
-    category !== undefined ? String(category).trim() : cur.category,
-    frequency !== undefined ? frequency : cur.frequency,
-    archived !== undefined ? (archived ? 1 : 0) : cur.archived,
-    nextOrder,
-    id
-  );
+  const nextArchived = archived !== undefined ? (archived ? 1 : 0) : cur.archived;
+  const archiveChanged = nextArchived !== cur.archived;
+  const update = db.transaction(() => {
+    db.prepare(
+      `UPDATE sites SET name=?, url=?, category=?, frequency=?, archived=?, sort_order=? WHERE id=?`
+    ).run(
+      name !== undefined ? String(name).trim() : cur.name,
+      url !== undefined ? String(url).trim() : cur.url,
+      category !== undefined ? String(category).trim() : cur.category,
+      frequency !== undefined ? frequency : cur.frequency,
+      nextArchived,
+      nextOrder,
+      id
+    );
+
+    if (!archiveChanged) return;
+    const today = isoToday();
+    if (nextArchived) {
+      const open = db.prepare(
+        `SELECT id FROM site_activity_periods WHERE site_id = ? AND active_until = '' ORDER BY active_from DESC LIMIT 1`
+      ).get(id);
+      if (open) {
+        db.prepare('UPDATE site_activity_periods SET active_until = ? WHERE id = ?').run(today, open.id);
+      } else {
+        // 兼容异常旧数据：补一个零长度区间，避免归档操作留下不一致状态。
+        db.prepare('INSERT OR IGNORE INTO site_activity_periods (site_id, active_from, active_until) VALUES (?, ?, ?)')
+          .run(id, today, today);
+      }
+    } else {
+      const latest = db.prepare(
+        'SELECT id, active_until FROM site_activity_periods WHERE site_id = ? ORDER BY active_from DESC LIMIT 1'
+      ).get(id);
+      if (latest?.active_until === today) {
+        // 同一天归档后又恢复，直接重开原区间，避免唯一键冲突和虚假空档。
+        db.prepare("UPDATE site_activity_periods SET active_until = '' WHERE id = ?").run(latest.id);
+      } else {
+        db.prepare('INSERT INTO site_activity_periods (site_id, active_from) VALUES (?, ?)').run(id, today);
+      }
+    }
+  });
+  update();
   res.json(db.prepare('SELECT * FROM sites WHERE id = ?').get(id));
 });
 

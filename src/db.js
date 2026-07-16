@@ -37,6 +37,20 @@ CREATE TABLE IF NOT EXISTS checkins (
 );
 CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(date);
 
+-- 网站启用区间，active_until 为空表示仍在用；否则为首个不再计入签到的日期（左闭右开）。
+-- 独立记录区间，才能在网站多次归档/恢复后仍准确还原历史日历。
+CREATE TABLE IF NOT EXISTS site_activity_periods (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id      INTEGER NOT NULL,
+  active_from  TEXT    NOT NULL,
+  active_until TEXT    NOT NULL DEFAULT '',
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(site_id, active_from),
+  FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_site_activity_periods_dates
+  ON site_activity_periods(site_id, active_from, active_until);
+
 -- 需要周期性续期的项目（如 40 天续期）
 CREATE TABLE IF NOT EXISTS renewals (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +136,19 @@ db.prepare(
      substr(created_at, 1, 10)
    )
    WHERE active_from = '' OR active_from IS NULL`
+).run();
+
+// 为旧数据补出首个启用区间。已归档网站无法还原准确归档日，使用最后一次签到的次日，
+// 至少保证所有既有签到记录和此前的完成状态不会丢失。
+db.prepare(
+  `INSERT INTO site_activity_periods (site_id, active_from, active_until)
+   SELECT s.id,
+          s.active_from,
+          CASE WHEN s.archived = 0 THEN ''
+               ELSE COALESCE(date((SELECT MAX(c.date) FROM checkins c WHERE c.site_id = s.id), '+1 day'), s.active_from)
+          END
+   FROM sites s
+   WHERE NOT EXISTS (SELECT 1 FROM site_activity_periods p WHERE p.site_id = s.id)`
 ).run();
 
 ensureColumn('renewal_history', 'paid_on', "TEXT NOT NULL DEFAULT ''");

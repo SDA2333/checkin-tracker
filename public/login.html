@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#6366f1" />
+  <meta name="theme-color" content="#76c9b4" />
   <title>登录 · 签到清单</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍃</text></svg>" />
   <style>
     * { box-sizing: border-box; }
     @keyframes bgFloat {
@@ -78,12 +78,71 @@
     @media (prefers-reduced-motion: reduce) {
       body, .card, .card.shake, button.loading::after { animation: none !important; }
     }
+    /* Animal Island login */
+    body {
+      font-family: "Arial Rounded MT Bold", "Nunito", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 16% 14%, #ffe39a 0 58px, rgba(255,227,154,.3) 59px 78px, transparent 79px),
+        linear-gradient(174deg, #cfeee2 0 48%, #a9dba9 48.2% 69%, #82c485 69.2% 100%);
+      color: #725d42;
+      animation: none;
+    }
+    body::before {
+      background:
+        radial-gradient(ellipse at 14% 30%, rgba(255,255,255,.62) 0 32px, transparent 33px),
+        radial-gradient(ellipse at 84% 20%, rgba(255,255,255,.48) 0 48px, transparent 49px),
+        radial-gradient(circle, rgba(255,247,206,.48) 2px, transparent 2.5px) 0 0/36px 36px;
+      animation: loginSky 48s linear infinite;
+    }
+    body::after {
+      content: ''; position: absolute; inset: auto -8% -20vh; height: 55vh; pointer-events: none;
+      background:
+        radial-gradient(ellipse at 17% 70%, #6fae73 0 24%, transparent 24.5%),
+        radial-gradient(ellipse at 72% 66%, #77b77c 0 31%, transparent 31.5%);
+      opacity: .62;
+    }
+    .card {
+      position: relative; z-index: 2; max-width: 390px; padding: 39px 34px 34px;
+      color: #725d42;
+      background:
+        radial-gradient(circle, rgba(194,177,142,.20) 1.5px, transparent 1.8px) 0 0/27px 27px,
+        radial-gradient(circle, rgba(194,177,142,.13) 1px, transparent 1.3px) 7px 7px/14px 14px,
+        #f7f3df;
+      border: 2px solid #d9cbae; border-radius: 38px 29px 42px 31px / 32px 43px 29px 39px;
+      box-shadow: 0 8px 0 rgba(119,93,56,.20), 0 28px 70px rgba(52,85,54,.20);
+      backdrop-filter: none; animation: islandLoginIn .55s cubic-bezier(.22,1.25,.36,1);
+    }
+    .login-leaf {
+      display: grid; place-items: center; width: 68px; height: 68px; margin: -76px auto 18px;
+      border: 4px solid #fff7dd; border-radius: 48% 52% 45% 55%; background: #f4cb5c;
+      box-shadow: 0 6px 0 #bd9340; font-size: 34px; transform: rotate(-5deg); animation: loginLeaf 3s ease-in-out infinite;
+    }
+    h1 { color: #725d42; background: none; font-size: 29px; font-weight: 900; }
+    p.sub { color: #9a8b72; margin-bottom: 28px; }
+    label { color: #88745a; padding-left: 12px; font-weight: 800; }
+    input {
+      min-height: 48px; padding: 11px 18px; color: #725d42; background: #fffaf0;
+      border: 2.5px solid #d4c6a9; border-radius: 999px; font-family: inherit; font-weight: 650;
+    }
+    input:focus { border-color: #f3c627; box-shadow: 0 0 0 4px rgba(243,198,39,.17); }
+    button {
+      min-height: 48px; margin-top: 22px; color: #fffdf0; background: #19bcae;
+      border: 2px solid #19bcae; border-radius: 999px; box-shadow: 0 6px 0 #119b90;
+      font-family: inherit; font-weight: 900; transition: all .25s cubic-bezier(.4,0,.2,1);
+    }
+    button:hover { filter: none; transform: translateY(-1px); box-shadow: 0 7px 0 #119b90, 0 12px 24px rgba(25,188,174,.18); }
+    button:active { transform: translateY(4px); box-shadow: 0 1px 0 #119b90; }
+    .err { color: #d35d58; font-weight: 700; }
+    @keyframes islandLoginIn { from { opacity: 0; transform: translateY(24px) scale(.92) rotate(-.5deg); } to { opacity: 1; transform: none; } }
+    @keyframes loginLeaf { 0%,100% { transform: rotate(-6deg); } 50% { transform: rotate(7deg); } }
+    @keyframes loginSky { to { background-position: 80px 10px, -80px 10px, 36px 36px; } }
   </style>
 </head>
 <body>
   <form class="card" id="form">
-    <h1>✓ 签到清单</h1>
-    <p class="sub">请输入访问密码</p>
+    <div class="login-leaf" aria-hidden="true">🍃</div>
+    <h1>欢迎回到签到小岛</h1>
+    <p class="sub">输入口令，开始今天的岛屿生活</p>
     <label for="pw">密码</label>
     <input id="pw" type="password" autocomplete="current-password" autofocus />
     <button type="submit">登录</button>
@@ -93,7 +152,22 @@
     const form = document.getElementById('form');
     const err = document.getElementById('err');
     const btn = form.querySelector('button');
+    let audioContext = null;
+    function playTone(kind) {
+      if (localStorage.getItem('ui-sound') === 'off') return;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      audioContext ||= new AudioCtx();
+      const notes = kind === 'success' ? [[523, 0], [659, .055], [784, .11]] : kind === 'error' ? [[250, 0], [180, .07]] : [[620, 0]];
+      notes.forEach(([freq, delay]) => {
+        const osc = audioContext.createOscillator(); const gain = audioContext.createGain(); const start = audioContext.currentTime + delay;
+        osc.type = kind === 'error' ? 'triangle' : 'sine'; osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(.0001, start); gain.gain.exponentialRampToValueAtTime(.02, start + .008); gain.gain.exponentialRampToValueAtTime(.0001, start + .09);
+        osc.connect(gain); gain.connect(audioContext.destination); osc.start(start); osc.stop(start + .11);
+      });
+    }
     function fail(msg) {
+      playTone('error');
       err.textContent = msg;
       form.classList.remove('shake');
       void form.offsetWidth; // 重排以重放动画
@@ -101,6 +175,7 @@
     }
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      playTone('tap');
       err.textContent = '';
       const password = document.getElementById('pw').value;
       btn.classList.add('loading');
@@ -111,7 +186,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
         });
-        if (res.ok) { location.href = '/'; return; }
+        if (res.ok) { playTone('success'); setTimeout(() => { location.href = '/'; }, 180); return; }
         const data = await res.json().catch(() => ({}));
         fail(data.error || '登录失败');
       } catch {

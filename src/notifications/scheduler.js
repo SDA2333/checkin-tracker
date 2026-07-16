@@ -28,8 +28,9 @@ export function startScheduler() {
       }
     },
     {
-      scheduled: true,
       timezone,
+      name: 'renewal-reminders',
+      noOverlap: true,
     }
   );
 
@@ -41,7 +42,7 @@ export function startScheduler() {
  */
 export function stopScheduler() {
   if (schedulerTask) {
-    schedulerTask.stop();
+    schedulerTask.destroy();
     schedulerTask = null;
     console.log('[scheduler] 续期提醒调度器已停止');
   }

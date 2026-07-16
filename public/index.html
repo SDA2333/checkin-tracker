@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#6366f1" />
+  <meta name="theme-color" content="#76c9b4" />
   <title>签到清单</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍃</text></svg>" />
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/ui/island-ui.css" />
   <script>
     // 尽早应用主题，避免加载时闪烁（'light'|'dark'|null=跟随系统）
     (function () {
@@ -19,18 +20,26 @@
 </head>
 <body class="with-bg">
   <header class="topbar">
-    <div class="brand">✓ 签到清单</div>
+    <div class="brand" aria-label="签到小岛">
+      <span class="brand-leaf" aria-hidden="true">🍃</span>
+      <span class="brand-copy"><strong>签到小岛</strong><small>ISLAND CHECK-IN</small></span>
+    </div>
     <nav class="tabs" id="tabs">
-      <button data-tab="today" class="active">今日</button>
-      <button data-tab="calendar">日历</button>
-      <button data-tab="renew">续期</button>
-      <button data-tab="manage">管理</button>
-      <button data-tab="settings">设置</button>
+      <button data-tab="today" class="active"><span aria-hidden="true">🏝️</span><em>今日</em></button>
+      <button data-tab="calendar"><span aria-hidden="true">🗓️</span><em>日历</em></button>
+      <button data-tab="renew"><span class="tab-svg renew-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" role="presentation"><path d="M6.2 7.8A7.2 7.2 0 0 1 18 6.3"/><path d="M6.2 3.8v4h4"/><path d="M17.8 16.2A7.2 7.2 0 0 1 6 17.7"/><path d="M17.8 20.2v-4h-4"/><path class="leaf-fill" d="M15.2 3.5c2.8-.2 4.5 1.1 4.7 3.7-2.7.3-4.3-.8-4.7-3.7Z"/></svg></span><em>续期</em></button>
+      <button data-tab="manage"><span aria-hidden="true">🧺</span><em>管理</em></button>
+      <button data-tab="settings"><span aria-hidden="true">⚙️</span><em>设置</em></button>
     </nav>
-    <button class="theme-toggle" id="themeToggle" title="切换深色/浅色" aria-label="切换深色/浅色">🌙</button>
-    <button class="bg-toggle" id="bgToggle" title="选择背景" aria-label="选择背景" aria-haspopup="dialog">🖼️</button>
-    <button class="logout" id="logout" title="退出登录">退出</button>
+    <div class="topbar-actions">
+      <button class="sound-toggle island-icon-btn" id="soundToggle" title="关闭界面音效" aria-label="关闭界面音效"><span aria-hidden="true">🔊</span></button>
+      <button class="theme-toggle island-icon-btn" id="themeToggle" title="切换深色/浅色" aria-label="切换深色/浅色"><span aria-hidden="true">🌙</span></button>
+      <button class="bg-toggle island-icon-btn" id="bgToggle" title="选择背景" aria-label="选择背景" aria-haspopup="dialog"><span aria-hidden="true">🖼️</span></button>
+      <button class="logout island-icon-btn" id="logout" title="退出登录" aria-label="退出登录"><span aria-hidden="true">↪</span></button>
+    </div>
   </header>
+
+  <div id="island-shell"></div>
 
   <main>
     <section id="view-today" class="view"></section>
@@ -43,6 +52,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="modal-root"></div>
 
+  <script type="module" src="/ui/island-ui.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

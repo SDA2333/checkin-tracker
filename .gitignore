@@ -16,3 +16,7 @@ src.backup-*/
 
 # Python 缓存
 __pycache__/
+
+# 本地浏览器视觉验收产物
+.playwright-cli/
+output/playwright/

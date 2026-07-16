@@ -8,6 +8,7 @@ import db from '../db.js';
 const router = Router();
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOADS = 20;
+const BUILT_IN_BACKGROUND_IDS = new Set(['none', 'default', 'summer']);
 const BACKGROUND_DIR = resolve(process.env.BACKGROUND_DIR || './data/backgrounds');
 const MIME_INFO = {
   'image/jpeg': { ext: '.jpg', matches: (body) => body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff },
@@ -23,7 +24,7 @@ function selectedId() {
   if (!row) return 'default';
   try {
     const value = JSON.parse(row.value);
-    return value === 'none' || value === 'default' || /^upload:\d+$/.test(value) ? value : 'default';
+    return BUILT_IN_BACKGROUND_IDS.has(value) || /^upload:\d+$/.test(value) ? value : 'default';
   } catch {
     return 'default';
   }
@@ -63,7 +64,8 @@ router.get('/', (req, res) => {
     selected: selectedExists ? selected : 'default',
     items: [
       { id: 'none', name: '无背景', url: null, builtIn: true },
-      { id: 'default', name: '默认背景', url: '/bg.jpg', builtIn: true },
+      { id: 'default', name: '清新剪影', url: '/acnh-island-pattern-bg.png', builtIn: true },
+      { id: 'summer', name: '夏日海岛', url: '/acnh-summer-bg.jpg', builtIn: true },
       ...uploads,
     ],
     limits: { maxBytes: MAX_BYTES, maxUploads: MAX_UPLOADS },
@@ -72,7 +74,7 @@ router.get('/', (req, res) => {
 
 router.put('/selection', (req, res) => {
   const id = req.body?.id;
-  if (id !== 'none' && id !== 'default' && !/^upload:\d+$/.test(String(id || ''))) {
+  if (!BUILT_IN_BACKGROUND_IDS.has(id) && !/^upload:\d+$/.test(String(id || ''))) {
     return res.status(400).json({ error: '背景选项无效' });
   }
   if (String(id).startsWith('upload:')) {

@@ -5,14 +5,36 @@ import { addDays, daysBetween, isoToday, isValidDate } from '../dates.js';
 
 const r = Router();
 
-// 今日（或指定日期）清单：返回所有在用网站 + 当天是否已签 + 连续天数
+const activeOnDateSql = `EXISTS (
+  SELECT 1 FROM site_activity_periods p
+  WHERE p.site_id = sites.id
+    AND p.active_from <= ?
+    AND (p.active_until = '' OR ? < p.active_until)
+)`;
+
+function siteWasActiveOn(siteId, date) {
+  return !!db.prepare(
+    `SELECT 1 FROM site_activity_periods
+     WHERE site_id = ? AND active_from <= ? AND (active_until = '' OR ? < active_until)
+     LIMIT 1`
+  ).get(siteId, date, date);
+}
+
+// 今日（或指定日期）清单：按当天启用状态返回网站；已有签到始终作为历史事实展示。
 r.get('/today', (req, res) => {
   const date = String(req.query.date || '');
   if (!isValidDate(date)) return res.status(400).json({ error: '需要有效的 date=YYYY-MM-DD' });
 
   const sites = db
-    .prepare(`SELECT * FROM sites WHERE archived = 0 AND active_from <= ? ORDER BY sort_order, id`)
-    .all(date);
+    .prepare(
+      `SELECT * FROM sites
+       WHERE active_from <= ?
+         AND (${activeOnDateSql} OR EXISTS (
+           SELECT 1 FROM checkins c WHERE c.site_id = sites.id AND c.date = ?
+         ))
+       ORDER BY sort_order, id`
+    )
+    .all(date, date, date, date);
   const checked = new Set(
     db.prepare('SELECT site_id FROM checkins WHERE date = ?').all(date).map((x) => x.site_id)
   );
@@ -53,10 +75,10 @@ r.post('/', (req, res) => {
   if (!Number.isSafeInteger(siteId) || siteId <= 0 || !isValidDate(date))
     return res.status(400).json({ error: '需要 site_id 与 date' });
   if (String(date) > isoToday()) return res.status(400).json({ error: '不能给未来日期签到' });
-  const site = db.prepare('SELECT id, archived, active_from FROM sites WHERE id = ?').get(siteId);
+  const site = db.prepare('SELECT id, active_from FROM sites WHERE id = ?').get(siteId);
   if (!site) return res.status(404).json({ error: '网站不存在' });
-  if (site.archived) return res.status(409).json({ error: '已归档网站不能签到' });
   if (String(date) < site.active_from) return res.status(409).json({ error: '不能在网站启用日期之前签到' });
+  if (!siteWasActiveOn(siteId, String(date))) return res.status(409).json({ error: '该网站在此日期未启用' });
   db.prepare('INSERT OR IGNORE INTO checkins (site_id, date) VALUES (?, ?)').run(
     siteId,
     String(date)
@@ -78,7 +100,7 @@ r.delete('/', (req, res) => {
   res.json({ ok: true });
 });
 
-// 日历汇总：返回区间内每天的打卡数量，以及当前在用网站总数
+// 日历汇总：打卡记录不因归档消失；每日总数按当日的网站启用区间计算。
 r.get('/calendar', (req, res) => {
   const from = String(req.query.from || '');
   const to = String(req.query.to || '');
@@ -89,7 +111,7 @@ r.get('/calendar', (req, res) => {
     .prepare(
       `SELECT c.date, COUNT(*) AS c
        FROM checkins c
-       JOIN sites s ON s.id = c.site_id AND s.archived = 0 AND s.active_from <= c.date
+       JOIN sites s ON s.id = c.site_id AND s.active_from <= c.date
        WHERE c.date BETWEEN ? AND ?
        GROUP BY c.date`
     )
@@ -97,24 +119,43 @@ r.get('/calendar', (req, res) => {
   const days = {};
   for (const row of rows) days[row.date] = row.c;
   const activeTotal = db.prepare('SELECT COUNT(*) AS c FROM sites WHERE archived = 0').get().c;
-  const starts = db
+  const periods = db
     .prepare(
-      `SELECT active_from, COUNT(*) AS c
-       FROM sites
-       WHERE archived = 0 AND active_from <= ?
-       GROUP BY active_from
-       ORDER BY active_from`
+      `SELECT active_from, active_until
+       FROM site_activity_periods
+       WHERE active_from <= ? AND (active_until = '' OR active_until > ?)`
     )
-    .all(to);
-  const increments = new Map(starts.map((row) => [row.active_from, row.c]));
-  const beforeRange = starts
-    .filter((row) => row.active_from < from)
-    .reduce((sum, row) => sum + row.c, 0);
+    .all(to, from);
+  const events = new Map();
+  for (const period of periods) {
+    const start = period.active_from < from ? from : period.active_from;
+    events.set(start, (events.get(start) || 0) + 1);
+    if (period.active_until && period.active_until <= to) {
+      events.set(period.active_until, (events.get(period.active_until) || 0) - 1);
+    }
+  }
+
+  // 兼容“当天签到后再归档”：区间从当天关闭，但已经发生的签到仍计入当天分子与分母。
+  const exceptions = new Map(
+    db.prepare(
+      `SELECT c.date, COUNT(*) AS c
+       FROM checkins c
+       JOIN sites s ON s.id = c.site_id AND s.active_from <= c.date
+       WHERE c.date BETWEEN ? AND ?
+         AND NOT EXISTS (
+           SELECT 1 FROM site_activity_periods p
+           WHERE p.site_id = c.site_id
+             AND p.active_from <= c.date
+             AND (p.active_until = '' OR c.date < p.active_until)
+         )
+       GROUP BY c.date`
+    ).all(from, to).map((row) => [row.date, row.c])
+  );
   const totals = {};
-  let runningTotal = beforeRange;
+  let runningTotal = 0;
   for (let date = from; date <= to; date = addDays(date, 1)) {
-    runningTotal += increments.get(date) || 0;
-    totals[date] = runningTotal;
+    runningTotal += events.get(date) || 0;
+    totals[date] = runningTotal + (exceptions.get(date) || 0);
   }
   res.json({ from, to, activeTotal, totals, days });
 });

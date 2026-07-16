@@ -23,6 +23,64 @@ function hrefOf(u) {
     return null;
   }
 }
+
+/* ---------- 岛屿音效（Web Audio 原创合成音，不加载外部音频） ---------- */
+const uiAudio = (() => {
+  let context = null;
+  let enabled = localStorage.getItem('ui-sound') !== 'off';
+
+  function ensureContext() {
+    if (!enabled) return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!context) context = new AudioCtx();
+    if (context.state === 'suspended') context.resume().catch(() => {});
+    return context;
+  }
+
+  function note(frequency, delay = 0, duration = 0.07, volume = 0.025, type = 'sine', endFrequency = null) {
+    const ctx = ensureContext();
+    if (!ctx) return;
+    const start = ctx.currentTime + delay;
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    if (endFrequency) oscillator.frequency.exponentialRampToValueAtTime(endFrequency, start + duration);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+  }
+
+  function play(kind = 'tap') {
+    if (!enabled) return;
+    if (kind === 'navigate') {
+      note(440, 0, 0.065, 0.022, 'triangle', 560);
+      note(660, 0.045, 0.07, 0.018, 'sine', 720);
+    } else if (kind === 'success') {
+      note(523.25, 0, 0.09, 0.022, 'sine', 560);
+      note(659.25, 0.055, 0.1, 0.022, 'sine', 700);
+      note(783.99, 0.11, 0.13, 0.026, 'triangle', 820);
+    } else if (kind === 'error') {
+      note(260, 0, 0.1, 0.022, 'triangle', 190);
+      note(180, 0.065, 0.11, 0.018, 'sine', 150);
+    } else {
+      note(620, 0, 0.045, 0.014, 'triangle', 520);
+    }
+  }
+
+  function setEnabled(value) {
+    enabled = !!value;
+    localStorage.setItem('ui-sound', enabled ? 'on' : 'off');
+    if (enabled) play('success');
+  }
+
+  return { play, setEnabled, isEnabled: () => enabled };
+})();
 function policyLabel(policy) {
   return ({
     extend_from_due: '按原到期日顺延',
@@ -80,6 +138,8 @@ function toast(msg, type = 'info', action = null) {
   clearTimeout(toastTimer);
   const dur = (action && action.duration) || 1900;
   toastTimer = setTimeout(() => t.classList.remove('show'), dur);
+  if (type === 'success') uiAudio.play('success');
+  else if (type === 'error') uiAudio.play('error');
 }
 const toastOk = (m, a) => toast(m, 'success', a);
 const toastErr = (m) => toast(m, 'error');
@@ -183,6 +243,11 @@ const state = {
   showSiteForm: false, showRenewForm: false,
 };
 const pendingRenewals = new Set();
+let checkAnimationId = null;
+
+function emitIslandEvent(name, detail) {
+  window.dispatchEvent(new CustomEvent(`island:${name}`, { detail }));
+}
 
 /* ---------- 今日签到 ---------- */
 async function loadToday() {
@@ -207,7 +272,7 @@ async function loadToday() {
       const sites = groups[cat];
       const groupItems = sites.map((s) => {
         const href = hrefOf(s.url);
-        return `<div class="checkitem ${s.done ? 'done' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}" role="button" tabindex="0" aria-pressed="${s.done ? 'true' : 'false'}" aria-label="${esc(s.name)}${s.done ? '，已签到' : '，未签到'}">
+        return `<div class="checkitem ${s.done ? 'done' : ''} ${s.done && s.id === checkAnimationId ? 'check-animating' : ''}" data-id="${s.id}" data-done="${s.done ? 1 : 0}" role="button" tabindex="0" aria-pressed="${s.done ? 'true' : 'false'}" aria-label="${esc(s.name)}${s.done ? '，已签到' : '，未签到'}">
           <div class="checkbox" aria-hidden="true"><span class="tick">${s.done ? '✓' : ''}</span></div>
           <div class="info">
             <div class="name">${esc(s.name)}</div>
@@ -234,7 +299,12 @@ async function loadToday() {
 
   view.innerHTML = `
     <div class="today-head">
-      <input type="date" id="datePick" value="${state.date}" max="${localToday()}" />
+      <div class="today-greeting">
+        <span class="island-kicker">DAILY CHECK-IN</span>
+        <strong>${isToday ? '今天也要元气满满' : '回到这一天看看'}</strong>
+        <span>${isToday ? '把今天的小目标逐个完成吧' : '补上那天遗漏的小脚印'}</span>
+      </div>
+      <div class="today-date-wrap"><span aria-hidden="true">📅</span><input type="date" id="datePick" value="${state.date}" max="${localToday()}" /></div>
       ${isToday ? '' : `<button class="btn ghost sm" data-action="backToday">回到今天</button>`}
       <div class="progress">
         <div class="row spread"><span class="muted">${isToday ? '今日进度' : esc(state.date)}</span><b>${data.doneCount}/${data.total}</b></div>
@@ -242,6 +312,12 @@ async function loadToday() {
       </div>
     </div>
     <div class="stagger">${items}</div>`;
+  emitIslandEvent('progress', {
+    done: data.doneCount,
+    total: data.total,
+    date: state.date,
+  });
+  checkAnimationId = null;
 
   // 进度条：下一帧再设宽度，让它从 0 缓动到目标值
   requestAnimationFrame(() => {
@@ -289,6 +365,7 @@ async function loadCalendar() {
   }).join('');
 
   view.innerHTML = `
+    <div class="section-head calendar-page-head"><div><span class="island-kicker">ISLAND CALENDAR</span><h2>小岛日历</h2></div></div>
     <div class="cal-head">
       <button class="btn ghost sm" data-action="prev" aria-label="上一月">‹</button>
       <div class="title">${d0.getFullYear()}年${d0.getMonth() + 1}月</div>
@@ -480,7 +557,7 @@ async function loadRenewals() {
   }).join('');
 
   view.innerHTML = `
-    <div class="section-head"><h2>续期提醒</h2><button class="btn sm" data-action="add">+ 添加</button></div>
+    <div class="section-head"><div><span class="island-kicker">GROWING LIST</span><h2>续期提醒</h2></div><button class="btn sm" data-action="add">＋ 添加</button></div>
     <div id="renewForm"></div>
     ${list.length ? `<div class="stagger">${groupsHtml}</div>`
       : `<div class="empty">还没有续期项。<br>把需要定期续期的东西加进来（如 40 天续期），到期会自动提醒。</div>`}`;
@@ -620,7 +697,7 @@ async function loadManage() {
   const active = sites.filter((s) => !s.archived);
   const archived = sites.filter((s) => s.archived);
   view.innerHTML = `
-    <div class="section-head"><h2>网站管理</h2><button class="btn sm" data-action="add">+ 添加网站</button></div>
+    <div class="section-head"><div><span class="island-kicker">ISLAND GUIDE</span><h2>网站管理</h2></div><button class="btn sm" data-action="add">＋ 添加网站</button></div>
     <div id="siteForm"></div>
     ${active.length ? `<div class="stagger">${active.map((s, i) => manageItem(s, i, active.length)).join('')}</div>`
       : `<div class="empty">还没有网站，点右上角「添加网站」。</div>`}
@@ -649,7 +726,9 @@ async function saveSite() {
 function updateRenewBadge(list) {
   const urgent = list.filter((r) => r.status !== 'ok').length;
   const btn = document.querySelector('#tabs button[data-tab="renew"]');
-  if (btn) btn.textContent = urgent ? `续期 (${urgent})` : '续期';
+  const label = btn?.querySelector('em');
+  if (label) label.textContent = urgent ? `续期 (${urgent})` : '续期';
+  emitIslandEvent('renewals', { urgent });
 }
 async function refreshRenewBadge() {
   try { updateRenewBadge(await api(`/api/renewals?today=${localToday()}`)); } catch { /* ignore */ }
@@ -688,7 +767,7 @@ async function loadSettings() {
       : '<div class="empty">暂无推送记录</div>';
 
     view.innerHTML = `
-      <div class="section-head"><h2>⚙️ 推送设置</h2></div>
+      <div class="section-head"><div><span class="island-kicker">NOOK NOTIFY</span><h2>推送设置</h2></div></div>
 
       <div class="card">
         <h3>Bark 推送配置</h3>
@@ -807,13 +886,35 @@ async function checkNow() {
 
 /* ---------- 导航 ---------- */
 const views = { today: loadToday, calendar: loadCalendar, renew: loadRenewals, manage: loadManage, settings: loadSettings };
+let tabSwitchTimer = null;
 function switchTab(tab) {
   closeContextMenu();
+  const target = document.getElementById('view-' + tab);
+  const outgoing = document.querySelector('.view:not(.hidden)');
+  const sameView = outgoing === target;
   state.activeTab = tab;
+  emitIslandEvent('tab', { tab });
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
-  document.getElementById('view-' + tab).classList.remove('hidden');
   views[tab]().catch((err) => toastErr(err.message));
+
+  clearTimeout(tabSwitchTimer);
+  document.querySelectorAll('.view').forEach((view) => view.classList.remove('view-leaving', 'view-entering'));
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const reveal = () => {
+    document.querySelectorAll('.view').forEach((view) => view.classList.add('hidden'));
+    target.classList.remove('hidden');
+    if (!reduceMotion) {
+      void target.offsetWidth;
+      target.classList.add('view-entering');
+      target.addEventListener('animationend', () => target.classList.remove('view-entering'), { once: true });
+    }
+  };
+
+  if (sameView || !outgoing || reduceMotion) reveal();
+  else {
+    outgoing.classList.add('view-leaving');
+    tabSwitchTimer = setTimeout(reveal, 130);
+  }
 }
 
 /* ---------- 事件绑定 ---------- */
@@ -826,6 +927,13 @@ document.getElementById('logout').addEventListener('click', async () => {
   location.href = '/login.html';
 });
 
+// 所有可交互控件共用轻触反馈；导航使用更明亮的双音。
+document.addEventListener('click', (event) => {
+  const control = event.target.closest('button, a[href], [role="button"]');
+  if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.id === 'soundToggle') return;
+  uiAudio.play(control.matches('[data-tab]') ? 'navigate' : 'tap');
+}, true);
+
 // 背景图库（选择结果保存在服务端，所有设备同步）
 const bgToggle = document.getElementById('bgToggle');
 let backgroundConfig = null;
@@ -833,6 +941,8 @@ let backgroundConfig = null;
 function applyBackground(config) {
   const selected = config?.selected || 'default';
   const item = config?.items?.find((candidate) => candidate.id === selected);
+  document.body.classList.toggle('with-default-bg', selected === 'default');
+  document.body.classList.toggle('with-scene-bg', selected === 'summer');
   if (selected === 'none' || !item?.url) {
     document.body.classList.remove('with-bg');
     document.body.style.removeProperty('--app-background-image');
@@ -870,7 +980,7 @@ function renderBackgroundGallery(overlay, config) {
         </span>
       </button>
     </div>`).join('');
-  const uploadedCount = config.items.length - 2;
+  const uploadedCount = config.items.filter((item) => !item.builtIn).length;
   overlay.querySelector('.background-count').textContent = `${uploadedCount}/${config.limits.maxUploads}`;
   const upload = overlay.querySelector('[data-background-upload]');
   upload.disabled = uploadedCount >= config.limits.maxUploads;
@@ -1001,7 +1111,10 @@ function currentThemeIsDark() {
 }
 function syncThemeIcon() {
   // 显示「点击后会切到的目标」的图标
-  themeToggle.textContent = currentThemeIsDark() ? '☀️' : '🌙';
+  const nextLabel = currentThemeIsDark() ? '切换到白天模式' : '切换到夜晚模式';
+  themeToggle.querySelector('span').textContent = currentThemeIsDark() ? '☀️' : '🌙';
+  themeToggle.title = nextLabel;
+  themeToggle.setAttribute('aria-label', nextLabel);
 }
 themeToggle.addEventListener('click', () => {
   const nextDark = !currentThemeIsDark();
@@ -1016,6 +1129,22 @@ if (window.matchMedia) {
   });
 }
 syncThemeIcon();
+
+// 音效开关：偏好仅保存在当前浏览器，不影响服务端配置。
+const soundToggle = document.getElementById('soundToggle');
+function syncSoundIcon() {
+  const enabled = uiAudio.isEnabled();
+  soundToggle.querySelector('span').textContent = enabled ? '🔊' : '🔇';
+  soundToggle.classList.toggle('muted', !enabled);
+  soundToggle.title = enabled ? '关闭界面音效' : '开启界面音效';
+  soundToggle.setAttribute('aria-label', soundToggle.title);
+  soundToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+}
+soundToggle.addEventListener('click', () => {
+  uiAudio.setEnabled(!uiAudio.isEnabled());
+  syncSoundIcon();
+});
+syncSoundIcon();
 
 // 折叠分组的通用函数（同步 aria-expanded）
 function toggleGroup(header) {
@@ -1034,9 +1163,11 @@ function syncTodayProgress() {
   const bar = todayView.querySelector('.progress .bar > i');
   if (count) count.textContent = `${doneCount}/${total}`;
   if (bar) bar.style.width = `${total ? Math.round((doneCount / total) * 100) : 0}%`;
+  emitIslandEvent('progress', { done: doneCount, total, date: state.date });
 }
 
 function setCheckitemDone(item, done) {
+  item.classList.remove('check-animating');
   item.classList.toggle('done', done);
   item.dataset.done = done ? '1' : '0';
   item.setAttribute('aria-pressed', done ? 'true' : 'false');
@@ -1044,6 +1175,11 @@ function setCheckitemDone(item, done) {
   item.setAttribute('aria-label', label.replace(done ? '，未签到' : '，已签到', done ? '，已签到' : '，未签到'));
   const tick = item.querySelector('.checkbox .tick');
   if (tick) tick.textContent = done ? '✓' : '';
+  if (done) {
+    void item.offsetWidth;
+    item.classList.add('check-animating');
+    setTimeout(() => item.classList.remove('check-animating'), 680);
+  }
   syncTodayProgress();
 }
 
@@ -1052,6 +1188,7 @@ async function toggleCheckin(item) {
   const id = Number(item.dataset.id);
   const done = item.dataset.done === '1';
   try {
+    if (!done) checkAnimationId = id;
     await api('/api/checkins', {
       method: done ? 'DELETE' : 'POST',
       body: JSON.stringify({ site_id: id, date: state.date }),
@@ -1062,12 +1199,12 @@ async function toggleCheckin(item) {
       toast('已取消签到', 'info', {
         label: '撤销', duration: 4000,
         onClick: async () => {
-          try { await api('/api/checkins', { method: 'POST', body: JSON.stringify({ site_id: id, date: state.date }) }); await loadToday(); toastOk('已恢复签到'); }
-          catch (err) { toastErr(err.message); }
+          try { await api('/api/checkins', { method: 'POST', body: JSON.stringify({ site_id: id, date: state.date }) }); checkAnimationId = id; await loadToday(); toastOk('已恢复签到'); }
+          catch (err) { checkAnimationId = null; toastErr(err.message); }
         },
       });
     }
-  } catch (err) { toastErr(err.message); }
+  } catch (err) { checkAnimationId = null; toastErr(err.message); }
 }
 
 // 今日
@@ -1643,5 +1780,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------- 启动 ---------- */
+window.addEventListener('island:navigate', (event) => {
+  const tab = event.detail?.tab;
+  if (views[tab]) switchTab(tab);
+});
 switchTab('today');
 refreshRenewBadge();

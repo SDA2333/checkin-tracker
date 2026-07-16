@@ -89,8 +89,9 @@ test('route validation prevents invalid data and database errors', async (t) => 
     assert.equal(futureDate.status, 400);
   });
 
-  await t.test('excludes archived sites from check-ins and calendar counts', async () => {
+  await t.test('preserves historical check-ins and totals after archiving', async () => {
     db.prepare('UPDATE sites SET active_from = ? WHERE id = ?').run('2026-01-01', siteId);
+    db.prepare('UPDATE site_activity_periods SET active_from = ? WHERE site_id = ?').run('2026-01-01', siteId);
     const checked = await request('/checkins', {
       method: 'POST',
       body: JSON.stringify({ site_id: siteId, date: '2026-01-01' }),
@@ -115,14 +116,26 @@ test('route validation prevents invalid data and database errors', async (t) => 
       body: JSON.stringify({ archived: true }),
     });
     assert.equal(archived.status, 200);
-    const rejected = await request('/checkins', {
+    const historicalAfterArchive = await request('/checkins/calendar?from=2026-01-01&to=2026-01-31');
+    assert.equal(historicalAfterArchive.body.days['2026-01-01'], 1);
+    assert.equal(historicalAfterArchive.body.totals['2026-01-01'], 1);
+    assert.equal(historicalAfterArchive.body.totals['2026-01-31'], 1);
+    const historicalDetail = await request('/checkins/today?date=2026-01-01');
+    assert.equal(historicalDetail.body.total, 1);
+    assert.equal(historicalDetail.body.doneCount, 1);
+
+    const allowedHistoricalCorrection = await request('/checkins', {
       method: 'POST',
       body: JSON.stringify({ site_id: siteId, date: '2026-01-02' }),
     });
-    assert.equal(rejected.status, 409);
-    const calendar = await request('/checkins/calendar?from=2026-01-01&to=2026-01-31');
-    assert.deepEqual(calendar.body.days, {});
-    assert.equal(calendar.body.totals['2026-01-01'], 0);
+    assert.equal(allowedHistoricalCorrection.status, 200);
+
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong' }).format(new Date());
+    const rejectedCurrent = await request('/checkins', {
+      method: 'POST',
+      body: JSON.stringify({ site_id: siteId, date: today }),
+    });
+    assert.equal(rejectedCurrent.status, 409);
   });
 
   await t.test('limits oversized calendar ranges', async () => {
@@ -209,7 +222,19 @@ test('background gallery validates uploads and keeps selection consistent', asyn
     const result = await request('/backgrounds');
     assert.equal(result.status, 200);
     assert.equal(result.body.selected, 'default');
-    assert.deepEqual(result.body.items.slice(0, 2).map((item) => item.id), ['none', 'default']);
+    assert.deepEqual(result.body.items.slice(0, 3).map((item) => item.id), ['none', 'default', 'summer']);
+
+    const summer = await request('/backgrounds/selection', {
+      method: 'PUT',
+      body: JSON.stringify({ id: 'summer' }),
+    });
+    assert.equal(summer.status, 200);
+    assert.equal(summer.body.selected, 'summer');
+
+    await request('/backgrounds/selection', {
+      method: 'PUT',
+      body: JSON.stringify({ id: 'default' }),
+    });
   });
 
   await t.test('rejects unsupported and forged image bodies', async () => {
@@ -263,7 +288,7 @@ test('background gallery validates uploads and keeps selection consistent', asyn
     assert.equal(result.body.selected, 'default');
     const gallery = await request('/backgrounds');
     assert.equal(gallery.body.selected, 'default');
-    assert.equal(gallery.body.items.length, 2);
+    assert.equal(gallery.body.items.length, 3);
   });
 });
 
