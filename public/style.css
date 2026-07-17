@@ -528,14 +528,14 @@ input:focus, select:focus {
 /* ---- 管理 ---- */
 .manage-item { display: flex; align-items: center; gap: 10px; }
 .manage-item .info { flex: 1; min-width: 0; }
-.manage-item .ord { display: flex; flex-direction: column; gap: 2px; }
-.manage-item .ord button {
+.manage-item .ord, .renew-card .ord { display: flex; flex-direction: column; gap: 2px; }
+.manage-item .ord button, .renew-card .ord button {
   border: none; background: var(--bg); border-radius: 6px; width: 26px; height: 20px; font-size: 11px; color: var(--muted);
   transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.manage-item .ord button:hover:not([disabled]) { background: var(--line); }
-.manage-item .ord button:active:not([disabled]) { transform: scale(.85); }
-.manage-item .ord button[disabled] { opacity: .4; cursor: not-allowed; }
+.manage-item .ord button:hover:not([disabled]), .renew-card .ord button:hover:not([disabled]) { background: var(--line); }
+.manage-item .ord button:active:not([disabled]), .renew-card .ord button:active:not([disabled]) { transform: scale(.85); }
+.manage-item .ord button[disabled], .renew-card .ord button[disabled] { opacity: .4; cursor: not-allowed; }
 .manage-item { transition: box-shadow var(--dur-base) var(--ease-out); }
 .manage-item:hover { box-shadow: var(--shadow-lift); }
 
@@ -605,6 +605,8 @@ input:focus, select:focus {
   /* 续期卡片:竖排 */
   .renew-card { flex-direction: column; align-items: flex-start; gap: 10px; }
   .renew-card .badge { min-width: auto; align-self: flex-start; }
+  .renew-card .ord { position: absolute; top: 12px; right: 12px; flex-direction: row; gap: 4px; }
+  .renew-card .ord button { width: 32px; height: 26px; }
   .renew-actions { width: 100%; }
   .renew-actions button { flex: 1; }
 
@@ -1327,7 +1329,7 @@ input:focus, select:focus { border-color: #f3c627; box-shadow: 0 0 0 4px rgba(24
 .renew-card::before { width: 8px; border-radius: 8px; left: -4px; top: 18%; bottom: 18%; }
 .badge { min-width: 76px; border: 2px solid currentColor; border-radius: 22px 18px 22px 18px; }
 .renew-actions { gap: 9px; }
-.manage-item .ord button { border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--card); }
+.manage-item .ord button, .renew-card .ord button { border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--card); }
 .form-grid { gap: 14px 12px; }
 .empty { margin-top: 18px; padding: 54px 20px; border: 2px dashed var(--line); border-radius: 28px; background: color-mix(in srgb, var(--card) 82%, transparent); font-weight: 700; }
 .empty::before { content: '🍂'; display: block; margin-bottom: 9px; font-size: 28px; animation: leafWiggle 3s ease-in-out infinite; }

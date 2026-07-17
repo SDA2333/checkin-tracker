@@ -215,6 +215,45 @@ test('route validation prevents invalid data and database errors', async (t) => 
     const history = await request(`/renewals/${created.body.id}/history`);
     assert.equal(history.body.length, 2);
   });
+
+  await t.test('moves renewal items within the same category and persists order', async () => {
+    const create = (name, category) => request('/renewals', {
+      method: 'POST',
+      body: JSON.stringify({ name, category, cycle_days: 30, last_renewed: '2026-03-01' }),
+    });
+    const first = await create('Order A', '排序测试');
+    const second = await create('Order B', '排序测试');
+    await create('Other category', '其他分类');
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+
+    const moved = await request(`/renewals/${second.body.id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ dir: 'up' }),
+    });
+    assert.equal(moved.status, 200);
+    assert.equal(moved.body.moved, true);
+
+    const ordered = (await request('/renewals?today=2026-03-10')).body
+      .filter((item) => item.category === '排序测试')
+      .map((item) => item.name);
+    assert.deepEqual(ordered, ['Order B', 'Order A']);
+
+    const boundary = await request(`/renewals/${second.body.id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ dir: 'up' }),
+    });
+    assert.equal(boundary.status, 200);
+    assert.equal(boundary.body.moved, false);
+    assert.equal((await request(`/renewals/${second.body.id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ dir: 'sideways' }),
+    })).status, 400);
+    assert.equal((await request('/renewals/999999/move', {
+      method: 'POST',
+      body: JSON.stringify({ dir: 'down' }),
+    })).status, 404);
+  });
 });
 
 test('background gallery validates uploads and keeps selection consistent', async (t) => {

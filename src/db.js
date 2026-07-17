@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS renewals (
   renewal_policy       TEXT   NOT NULL DEFAULT 'extend_from_due', -- extend_from_due | reset_from_payment | manual_effective_date
   remind_before_days  INTEGER NOT NULL DEFAULT 3,  -- 到期前几天开始提醒
   note                TEXT    NOT NULL DEFAULT '',
+  sort_order          INTEGER NOT NULL DEFAULT 0,
   archived            INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -161,6 +162,14 @@ ensureColumn('renewal_history', 'policy_used', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('renewal_history', 'note', "TEXT NOT NULL DEFAULT ''");
 
 ensureColumn('renewals', 'category', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('renewals', 'sort_order', "INTEGER NOT NULL DEFAULT 0");
+
+// 旧版本没有续期排序字段，按原始创建顺序补齐稳定位置。
+db.prepare(
+  `UPDATE renewals
+   SET sort_order = id
+   WHERE sort_order = 0`
+).run();
 
 db.prepare(
   `UPDATE renewals

@@ -44,12 +44,12 @@ function decorate(row, today) {
   };
 }
 
-// 列表，按剩余天数升序（最紧急在前）
+// 列表按用户设置的稳定顺序返回；紧迫度通过状态字段单独表达。
 r.get('/', (req, res) => {
   const today = isValidDate(req.query.today) ? String(req.query.today) : isoToday();
   const where = req.query.archived === '1' ? '' : 'WHERE archived = 0';
-  const rows = db.prepare(`SELECT * FROM renewals ${where}`).all();
-  res.json(rows.map((x) => decorate(x, today)).sort((a, b) => a.days_left - b.days_left));
+  const rows = db.prepare(`SELECT * FROM renewals ${where} ORDER BY sort_order, id`).all();
+  res.json(rows.map((x) => decorate(x, today)));
 });
 
 // 新增
@@ -81,11 +81,13 @@ r.post('/', (req, res) => {
     return res.status(400).json({ error: '提醒天数需为非负整数' });
   if (!POLICIES.has(String(renewal_policy))) return res.status(400).json({ error: '续期策略不支持' });
   const policy = String(renewal_policy);
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM renewals').get().m;
   const createRenewal = db.transaction(() => {
     const info = db.prepare(
       `INSERT INTO renewals
-       (name, url, cycle_days, last_renewed, current_period_start, current_period_end, renewal_policy, remind_before_days, note, category)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (name, url, cycle_days, last_renewed, current_period_start, current_period_end, renewal_policy,
+        remind_before_days, note, category, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       String(name).trim(),
       String(url).trim(),
@@ -96,7 +98,8 @@ r.post('/', (req, res) => {
       policy,
       remindDays,
       String(note),
-      String(category).trim()
+      String(category).trim(),
+      maxOrder + 1
     );
     db.prepare(
       `INSERT INTO renewal_history
@@ -164,10 +167,14 @@ r.put('/:id', (req, res) => {
         ? addDays(nextStart, cycle_days !== undefined ? Number(cycle_days) : cur.cycle_days)
         : periodEnd(cur);
   if (nextEnd < nextStart) return res.status(400).json({ error: '当前到期日不能早于周期开始日' });
+  const nextCategory = category !== undefined ? String(category).trim() : (cur.category || '');
+  const nextSortOrder = nextCategory !== (cur.category || '')
+    ? db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM renewals').get().m + 1
+    : cur.sort_order;
   db.prepare(
     `UPDATE renewals
      SET name=?, url=?, cycle_days=?, last_renewed=?, current_period_start=?, current_period_end=?, renewal_policy=?,
-         remind_before_days=?, note=?, category=?, archived=?
+         remind_before_days=?, note=?, category=?, sort_order=?, archived=?
      WHERE id=?`
   ).run(
     name !== undefined ? String(name).trim() : cur.name,
@@ -179,11 +186,43 @@ r.put('/:id', (req, res) => {
     renewal_policy !== undefined ? String(renewal_policy) : normalizePolicy(cur.renewal_policy),
     remind_before_days !== undefined ? Number(remind_before_days) : cur.remind_before_days,
     note !== undefined ? String(note) : cur.note,
-    category !== undefined ? String(category).trim() : (cur.category || ''),
+    nextCategory,
+    nextSortOrder,
     archived !== undefined ? (archived ? 1 : 0) : cur.archived,
     id
   );
   res.json(decorate(db.prepare('SELECT * FROM renewals WHERE id = ?').get(id), isoToday()));
+});
+
+// 与同一分类中的相邻续期项目交换顺序（dir = 'up' | 'down'）。
+r.post('/:id/move', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID 无效' });
+  const dir = req.body?.dir;
+  if (dir !== 'up' && dir !== 'down') return res.status(400).json({ error: 'dir 必须为 up 或 down' });
+  const cur = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+  if (!cur) return res.status(404).json({ error: '不存在' });
+  if (cur.archived) return res.status(409).json({ error: '已归档项目不能调整顺序' });
+
+  const neighbor = db
+    .prepare(
+      dir === 'up'
+        ? `SELECT * FROM renewals
+           WHERE archived = 0 AND category = ? AND (sort_order, id) < (?, ?)
+           ORDER BY sort_order DESC, id DESC LIMIT 1`
+        : `SELECT * FROM renewals
+           WHERE archived = 0 AND category = ? AND (sort_order, id) > (?, ?)
+           ORDER BY sort_order ASC, id ASC LIMIT 1`
+    )
+    .get(cur.category || '', cur.sort_order, id);
+
+  if (!neighbor) return res.json({ ok: true, moved: false });
+  const swap = db.transaction(() => {
+    db.prepare('UPDATE renewals SET sort_order = ? WHERE id = ?').run(neighbor.sort_order, cur.id);
+    db.prepare('UPDATE renewals SET sort_order = ? WHERE id = ?').run(cur.sort_order, neighbor.id);
+  });
+  swap();
+  res.json({ ok: true, moved: true });
 });
 
 // 一键续期：记录实际付款日，并按策略推进服务周期

@@ -272,8 +272,10 @@ const state = {
   sites: [], renewals: [],
   editSite: null, editRenew: null,
   showSiteForm: false, showRenewForm: false,
+  expandedRenewCategories: new Set(),
 };
 const pendingRenewals = new Set();
+const pendingRenewalMoves = new Set();
 let checkAnimationId = null;
 
 function emitIslandEvent(name, detail) {
@@ -415,7 +417,7 @@ async function loadCalendar() {
 }
 
 /* ---------- 续期 ---------- */
-function renewCard(rn) {
+function renewCard(rn, idx, total) {
   let big, small;
   if (rn.days_left < 0) { big = '已过期'; small = `${-rn.days_left} 天`; }
   else if (rn.days_left === 0) { big = '今天'; small = '到期'; }
@@ -425,6 +427,10 @@ function renewCard(rn) {
   const end = rn.current_period_end || rn.next_due;
   const policy = rn.renewal_policy || 'extend_from_due';
   return `<div class="card renew-card ${rn.status}" data-id="${rn.id}">
+    <div class="ord renew-order" aria-label="${esc(rn.name)} 排序">
+      <button type="button" data-action="up" data-id="${rn.id}" aria-label="上移 ${esc(rn.name)}" title="上移" ${idx <= 0 ? 'disabled' : ''}>▲</button>
+      <button type="button" data-action="down" data-id="${rn.id}" aria-label="下移 ${esc(rn.name)}" title="下移" ${idx >= total - 1 ? 'disabled' : ''}>▼</button>
+    </div>
     <div class="badge ${rn.status}"><span>${big}</span><small>${small}</small></div>
     <div class="info">
       <div class="name">${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(rn.name)} ↗</a>` : esc(rn.name)}</div>
@@ -559,11 +565,6 @@ async function loadRenewals() {
     groups[cat].push(r);
   });
 
-  // 按紧迫度排序各分组
-  Object.keys(groups).forEach(cat => {
-    groups[cat].sort((a, b) => a.days_left - b.days_left);
-  });
-
   // 将"未分类"放到最后
   const sortedCategories = Object.keys(groups).sort((a, b) => {
     if (a === '未分类') return 1;
@@ -574,14 +575,15 @@ async function loadRenewals() {
   const groupsHtml = sortedCategories.map(cat => {
     const items = groups[cat];
     const hasUrgent = items.some(r => r.status === 'overdue' || r.status === 'soon');
+    const expanded = hasUrgent || state.expandedRenewCategories.has(cat);
     return `
-      <div class="group ${hasUrgent ? '' : 'collapsed'}">
-        <div class="group-header" role="button" tabindex="0" aria-expanded="${hasUrgent ? 'true' : 'false'}">
+      <div class="group ${expanded ? '' : 'collapsed'}" data-category="${esc(cat)}">
+        <div class="group-header" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}">
           <span class="group-name">${esc(cat)} (${items.length})</span>
           <span class="group-toggle" aria-hidden="true">▼</span>
         </div>
         <div class="group-content">
-          <div class="group-inner">${items.map(renewCard).join('')}</div>
+          <div class="group-inner">${items.map((item, index) => renewCard(item, index, items.length)).join('')}</div>
         </div>
       </div>
     `;
@@ -1185,6 +1187,10 @@ function toggleGroup(header) {
   if (!group) return;
   const collapsed = group.classList.toggle('collapsed');
   header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  if (group.closest('#view-renew') && group.dataset.category) {
+    if (collapsed) state.expandedRenewCategories.delete(group.dataset.category);
+    else state.expandedRenewCategories.add(group.dataset.category);
+  }
 }
 
 // 根据当前卡片状态同步顶部计数和进度条，供乐观更新与回滚复用。
@@ -1387,6 +1393,26 @@ async function handleRenewAction(action, id) {
       try { await renewItem(id, 'manual_effective_date', effectiveOn); } catch (err) { toastErr(err.message); }
       break;
     }
+    case 'up':
+    case 'down': {
+      closeRenewMenus();
+      if (pendingRenewalMoves.has(id)) break;
+      const renewal = state.renewals.find((item) => item.id === id);
+      if (renewal) state.expandedRenewCategories.add(renewal.category || '未分类');
+      pendingRenewalMoves.add(id);
+      const buttons = [...document.querySelectorAll(`#view-renew .renew-order [data-id="${id}"]`)];
+      buttons.forEach((button) => { button.disabled = true; });
+      try {
+        await api(`/api/renewals/${id}/move`, { method: 'POST', body: JSON.stringify({ dir: action }) });
+        await loadRenewals();
+      } catch (err) {
+        toastErr(err.message);
+      } finally {
+        pendingRenewalMoves.delete(id);
+        buttons.forEach((button) => { if (button.isConnected) button.disabled = false; });
+      }
+      break;
+    }
     case 'del': {
       closeRenewMenus();
       const rn = state.renewals.find((x) => x.id === id);
@@ -1406,7 +1432,7 @@ document.getElementById('view-renew').addEventListener('click', async (e) => {
   if (header) { toggleGroup(header); return; }
 
   const t = e.target.closest('[data-action]');
-  if (!t) return;
+  if (!t || t.disabled) return;
   const id = t.dataset.id ? Number(t.dataset.id) : null;
   if (t.dataset.action === 'menu') { openRenewMenu(t, id); return; }
   handleRenewAction(t.dataset.action, id);
