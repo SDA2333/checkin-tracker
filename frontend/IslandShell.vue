@@ -72,6 +72,26 @@ onBeforeUnmount(() => {
       class="ambient-leaf"
       :style="{ left: leaf.x, top: leaf.y, animationDelay: leaf.delay, width: `${leaf.size}px`, height: `${leaf.size * 0.72}px` }"
     ></span>
+    <div class="ambient-side ambient-side-left">
+      <span class="ambient-sign-post"></span>
+      <div class="ambient-sign-board">
+        <small>DAILY</small>
+        <strong>ISLAND</strong>
+        <span>→</span>
+      </div>
+      <span class="ambient-side-leaf leaf-one"></span>
+      <span class="ambient-side-leaf leaf-two"></span>
+      <span class="ambient-side-flower">✿</span>
+    </div>
+    <div class="ambient-side ambient-side-right">
+      <div class="ambient-balloon"><span>✦</span></div>
+      <span class="ambient-balloon-tail"></span>
+      <span class="ambient-balloon-string"></span>
+      <div class="ambient-shrub">
+        <span></span><span></span><span></span>
+      </div>
+      <span class="ambient-side-flower">✿</span>
+    </div>
   </div>
 
   <section class="island-hero" aria-labelledby="island-greeting">

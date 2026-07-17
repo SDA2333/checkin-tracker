@@ -218,10 +218,10 @@ test('route validation prevents invalid data and database errors', async (t) => 
 });
 
 test('background gallery validates uploads and keeps selection consistent', async (t) => {
-  await t.test('starts with the built-in background selected', async () => {
+  await t.test('starts without a background selected', async () => {
     const result = await request('/backgrounds');
     assert.equal(result.status, 200);
-    assert.equal(result.body.selected, 'default');
+    assert.equal(result.body.selected, 'none');
     assert.deepEqual(result.body.items.slice(0, 3).map((item) => item.id), ['none', 'default', 'summer']);
 
     const summer = await request('/backgrounds/selection', {
@@ -233,7 +233,7 @@ test('background gallery validates uploads and keeps selection consistent', asyn
 
     await request('/backgrounds/selection', {
       method: 'PUT',
-      body: JSON.stringify({ id: 'default' }),
+      body: JSON.stringify({ id: 'none' }),
     });
   });
 
@@ -282,12 +282,12 @@ test('background gallery validates uploads and keeps selection consistent', asyn
     assert.equal(missing.status, 404);
   });
 
-  await t.test('deleting the selected upload falls back to the default', async () => {
+  await t.test('deleting the selected upload falls back to no background', async () => {
     const result = await request(`/backgrounds/${uploadedId.slice(7)}`, { method: 'DELETE' });
     assert.equal(result.status, 200);
-    assert.equal(result.body.selected, 'default');
+    assert.equal(result.body.selected, 'none');
     const gallery = await request('/backgrounds');
-    assert.equal(gallery.body.selected, 'default');
+    assert.equal(gallery.body.selected, 'none');
     assert.equal(gallery.body.items.length, 3);
   });
 });

@@ -972,7 +972,7 @@ const bgToggle = document.getElementById('bgToggle');
 let backgroundConfig = null;
 
 function applyBackground(config) {
-  const selected = config?.selected || 'default';
+  const selected = config?.selected || 'none';
   const item = config?.items?.find((candidate) => candidate.id === selected);
   document.body.classList.toggle('with-default-bg', selected === 'default');
   document.body.classList.toggle('with-scene-bg', selected === 'summer');

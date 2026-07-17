@@ -1,4 +1,4 @@
-// 背景图库 API：内置默认图 + 上传图片 + 全局选择。
+// 背景图库 API：内置背景 + 上传图片 + 全局选择。
 import express, { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -9,6 +9,7 @@ const router = Router();
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOADS = 20;
 const BUILT_IN_BACKGROUND_IDS = new Set(['none', 'default', 'summer']);
+const DEFAULT_BACKGROUND_ID = 'none';
 const BACKGROUND_DIR = resolve(process.env.BACKGROUND_DIR || './data/backgrounds');
 const MIME_INFO = {
   'image/jpeg': { ext: '.jpg', matches: (body) => body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff },
@@ -21,12 +22,12 @@ mkdirSync(BACKGROUND_DIR, { recursive: true });
 
 function selectedId() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'background_selected'").get();
-  if (!row) return 'default';
+  if (!row) return DEFAULT_BACKGROUND_ID;
   try {
     const value = JSON.parse(row.value);
-    return BUILT_IN_BACKGROUND_IDS.has(value) || /^upload:\d+$/.test(value) ? value : 'default';
+    return BUILT_IN_BACKGROUND_IDS.has(value) || /^upload:\d+$/.test(value) ? value : DEFAULT_BACKGROUND_ID;
   } catch {
-    return 'default';
+    return DEFAULT_BACKGROUND_ID;
   }
 }
 
@@ -59,9 +60,9 @@ router.get('/', (req, res) => {
   const uploads = db.prepare('SELECT * FROM backgrounds ORDER BY created_at DESC, id DESC').all().map(serialize);
   const selected = selectedId();
   const selectedExists = selected === 'none' || selected === 'default' || uploads.some((item) => item.id === selected);
-  if (!selectedExists) setSelected('default');
+  if (!selectedExists) setSelected(DEFAULT_BACKGROUND_ID);
   res.json({
-    selected: selectedExists ? selected : 'default',
+    selected: selectedExists ? selected : DEFAULT_BACKGROUND_ID,
     items: [
       { id: 'none', name: '无背景', url: null, builtIn: true },
       { id: 'default', name: '清新剪影', url: '/acnh-island-pattern-bg.png', builtIn: true },
@@ -147,10 +148,10 @@ router.delete('/:id', (req, res) => {
   const deletingSelected = selectedId() === `upload:${id}`;
   const remove = db.transaction(() => {
     db.prepare('DELETE FROM backgrounds WHERE id = ?').run(id);
-    if (deletingSelected) setSelected('default');
+    if (deletingSelected) setSelected(DEFAULT_BACKGROUND_ID);
   });
   remove();
-  res.json({ ok: true, selected: deletingSelected ? 'default' : selectedId() });
+  res.json({ ok: true, selected: deletingSelected ? DEFAULT_BACKGROUND_ID : selectedId() });
 });
 
 export default router;
